@@ -14,24 +14,7 @@ npm run example
 ### usage
 
 ```bash
-npm i cjj-layer --save
-```
-
-in webpack
-```javascript
-{
-    loader: 'babel-loader',
-    include: [
-        ...,
-        path.resolve(__dirname, './node_modules/three/examples'),
-    ],
-}                    
-```
-in vue cli 
-```javascript
-    transpileDependencies: [
-       'three/examples'
-    ]
+npm i jj-layer --save
 ```
 
 ### use [custom workers](https://developers.arcgis.com/javascript/latest/api-reference/esri-core-workers.html)
@@ -40,7 +23,7 @@ some layer require custom worker, like **FlowingLineLayer**, **ClientRasterFlowL
 
 if you do not use these layers, you can skip this step
 
-1. copy **./node_modules/cjj-layer/dist/workers** to your static folder
+1. copy **./node_modules/jj-layer/dist/workers** to your static folder
 2. config it in entry file
 ```javascript
 //main.js
@@ -59,10 +42,10 @@ Object.assign(config.workers.loaderConfig.paths, {
 
 visualize your client raster data(uv) with animated streamlines
 
-![rasterFlowLine](https://github.com/dengcheke/cjj-layer/blob/main/static/img/raster-flow-line.gif)
+![rasterFlowLine](https://github.com/dengcheke/jj-layer/blob/main/static/img/raster-flow-line.gif)
 
 ```javascript
-import {loadClientRasterFlowLineLayer} from "cjj-layer";
+import {loadClientRasterFlowLineLayer} from "jj-layer";
 const [Map,MapView] = await loadModules(["esri/Map","esri/views/MapView"])
 const map = new Map(), view = new MapView({map});
 const buffer = (await axios.get("/uv_822x1078", {responseType: 'arraybuffer'})).data;            
@@ -99,10 +82,10 @@ map.add(layer);
 ### **FlowingLineLayer** 
 **arcgis-api version >= 4.12**, **require workers**
 
-![flowLink](https://github.com/dengcheke/cjj-layer/blob/main/static/img/flowlink.gif)
+![flowLink](https://github.com/dengcheke/jj-layer/blob/main/static/img/flowlink.gif)
 
 ```javascript
-import {loadFlowingLineLayer} from "cjj-layer";
+import {loadFlowingLineLayer} from "jj-layer";
 const [Map,MapView] = await loadModules(["esri/Map","esri/views/MapView"])
 const map = new Map(), view = new MapView({map});
 const layer = await loadFlowingLineLayer({
@@ -141,10 +124,10 @@ layer.renderOpts.speed = 0.3;// no need to call updateStyle()
 
 Build a layer from a client raster array<br/>
 
-![rasterColormap](https://github.com/dengcheke/cjj-layer/blob/main/static/img/rastercolormap.gif)
+![rasterColormap](https://github.com/dengcheke/jj-layer/blob/main/static/img/rastercolormap.gif)
 
 ```javascript
-import {loadClientRasterColormapLayer} from "cjj-layer";
+import {loadClientRasterColormapLayer} from "jj-layer";
 const layer = await loadClientRasterColormapLayer({
     data:null,
     curTime:null,
@@ -194,10 +177,10 @@ setInterval(()=>{
 
 Build a layer from a client raster array(uv)<br/>
 
-![vectorField](https://github.com/dengcheke/cjj-layer/blob/main/static/img/vectorfield.gif)
+![vectorField](https://github.com/dengcheke/jj-layer/blob/main/static/img/vectorfield.gif)
 
 ```javascript
-import {loadClientVectorFieldLayer} from "cjj-layer";
+import {loadClientVectorFieldLayer} from "jj-layer";
 const layer = await loadClientVectorFieldLayer({
     curTime:null,
     data:{
@@ -246,7 +229,7 @@ setInterval(()=>{
 ### **DataSeriesGraphicsLayer**
 **arcgis-api version >= 4.14**
 
-![dataSeries](https://github.com/dengcheke/cjj-layer/blob/main/static/img/dataseries.gif)
+![dataSeries](https://github.com/dengcheke/jj-layer/blob/main/static/img/dataseries.gif)
 
 ```
 //if you have data like these:
@@ -261,7 +244,7 @@ g5    v51, v52, v53, v54, ...
 ```
 
 ```javascript
-import {loadDataSeriesGraphicsLayer} from "cjj-layer";
+import {loadDataSeriesGraphicsLayer} from "jj-layer";
 const layer = await loadDataSeriesGraphicsLayer({
     curTime:null,
     graphics:[g1,g2,g3,...],
@@ -290,10 +273,10 @@ setInterval(()=>{
 ### **Tip3DLayer**
 **arcgis-api version >= 4.12**
 
-![dataSeries](https://github.com/dengcheke/cjj-layer/blob/main/static/img/tip3d.gif)
+![dataSeries](https://github.com/dengcheke/jj-layer/blob/main/static/img/tip3d.gif)
 
 ```javascript
-import {loadTip3DLayer} from "cjj-layer";
+import {loadTip3DLayer} from "jj-layer";
 
 const layer = await loadTip3DLayer(); //layer is GraphicsLayer
 map.add(layer);
@@ -314,7 +297,7 @@ layer.add({
 ```
 
 ### misc
-colorStops.png => ![colorStop](https://github.com/dengcheke/cjj-layer/blob/main/static/img/colorstop.png)
+colorStops.png => ![colorStop](https://github.com/dengcheke/jj-layer/blob/main/static/img/colorstop.png)
 
 ```javascript
 import img from 'colorStops.png'
