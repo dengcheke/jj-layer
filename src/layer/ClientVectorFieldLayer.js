@@ -29,12 +29,13 @@ const defaultColorStops = Object.freeze([
 ])
 
 async function ClientVectorFieldLayerBuilder() {
-    let [Accessor, Layer, BaseLayerViewGL2D, projection]
+    let [Accessor, Layer, BaseLayerViewGL2D, projection, kernel]
         = await esriLoader.loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
-        "esri/geometry/projection"
+        "esri/geometry/projection",
+        "esri/kernel"
     ]);
     const VFOpts = Accessor.createSubclass({
         declaredClass: 'custom.renderers.vectorField',
@@ -299,7 +300,7 @@ async function ClientVectorFieldLayerBuilder() {
 
             const gl = this.context;
             const {renderer, mesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this);
+            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);

@@ -5,11 +5,11 @@
   "scripts": {
     "example": "cross-env NODE_ENV=development webpack-dev-server --config ./build/example.config.js",
     "build-example": "rimraf docs && cross-env NODE_ENV=production webpack --config ./build/example.config.js",
-    "build": "npm run build-esm && npm run build-cjs && npm run build-worker && npm run copy-types",
+    "build": "npm run build-esm && npm run build-cjs && npm run build-worker && npm run copy",
     "build-esm": "rimraf ./dist/esm && rollup -c build/rollup.esm.js",
     "build-cjs": "rimraf ./dist/cjs && node build/rollup.cjs.js",
     "build-worker": "rimraf ./dist/workers && node build/build-worker.js",
-    "copy-types": "rimraf ./dist/types && ncp ./src/types ./dist/types"
+    "copy": "ncp ./src/types ./dist/types && ncp ./README.MD ./dist/README.MD"
   },
   "keywords": [
     "arcgis",

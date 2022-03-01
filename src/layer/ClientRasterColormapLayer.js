@@ -27,12 +27,13 @@ const defaultColorStops = Object.freeze([
     {value: 1, color: 'red'},
 ])
 async function ClientRasterColormapLayerBuilder() {
-    const [Accessor, Layer, BaseLayerViewGL2D, projection]
+    const [Accessor, Layer, BaseLayerViewGL2D, projection,kernel]
         = await esriLoader.loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
-        "esri/geometry/projection"
+        "esri/geometry/projection",
+        "esri/kernel"
     ]);
     const CMOpts = Accessor.createSubclass({
         constructor: function () {
@@ -235,7 +236,7 @@ async function ClientRasterColormapLayerBuilder() {
 
             const gl = this.context;
             const {renderer, mesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this);
+            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);

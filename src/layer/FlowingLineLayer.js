@@ -38,7 +38,7 @@ const WORKER_PATH = 'customWorkers/cjj-worker'
 async function FlowingLineLayerBuilder() {
     const [
         Color, Accessor, watchUtils, GraphicsLayer,
-        BaseLayerViewGL2D, Extent, workers
+        BaseLayerViewGL2D, Extent, workers, kernel
     ] = await esriLoader.loadModules([
         "esri/Color",
         "esri/core/Accessor",
@@ -47,6 +47,7 @@ async function FlowingLineLayerBuilder() {
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/geometry/Extent",
         "esri/core/workers",
+        "esri/kernel"
     ]);
 
     const ARCGIS_VERSION = await getApiVersion();
@@ -247,7 +248,7 @@ async function FlowingLineLayerBuilder() {
 
             const gl = this.context;
             const {renderer, lineMesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this);
+            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);

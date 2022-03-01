@@ -77,22 +77,26 @@ export async function getApiVersion(){
     return __version;
 }
 
-export function getRenderTarget() {
+export function getRenderTarget(version) {
     const gl = this.context;
-    if (this.getRenderTarget instanceof Function) {
-        // >=4.19 is { framebuffer, viewport }
-        // [4.15, 4.18] { framebufferObject, viewport }
-        const result = this.getRenderTarget();
-        result.framebuffer = result.framebuffer || result.framebufferObject;
-        result.framebufferObject = result.framebuffer;
-        return result;
-    } else {
-        // [4.12 - 4.14]
+    // [4.12, 4.14] no function getRenderTarget();
+    // [4.15, 4.18] getRenderTarget return { framebufferObject, viewport }
+    /**
+     problem in [4.15, 4.18], when window resize,
+     the return framebufferObject !== gl.getParameter(gl.FRAMEBUFFER_BINDING);
+     **/
+    // >=4.19 getRenderTarget return { framebuffer, viewport }
+    if (version === undefined || parseFloat(version) <= 4.18) {
         const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
         return {
             viewport: gl.getParameter(gl.VIEWPORT),
             framebuffer,
             framebufferObject: framebuffer
         }
+    } else {
+        const result = this.getRenderTarget();
+        result.framebuffer = result.framebuffer || result.framebufferObject;
+        result.framebufferObject = result.framebuffer;
+        return result;
     }
 }

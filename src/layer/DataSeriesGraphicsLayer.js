@@ -44,7 +44,7 @@ const Flags = Object.freeze({
 })
 
 async function DataSeriesGraphicsLayerBuilder() {
-    let [watchUtils, Accessor, GraphicsLayer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection]
+    let [watchUtils, Accessor, GraphicsLayer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
         = await esriLoader.loadModules([
         "esri/core/watchUtils",
         "esri/core/Accessor",
@@ -52,7 +52,8 @@ async function DataSeriesGraphicsLayerBuilder() {
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/geometry/geometryEngineAsync",
         "esri/geometry/Extent",
-        "esri/geometry/projection"
+        "esri/geometry/projection",
+        "esri/kernel"
     ]);
     const ARCGIS_VERSION = await getApiVersion();
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
@@ -295,7 +296,7 @@ async function DataSeriesGraphicsLayerBuilder() {
 
             const gl = this.context;
             const {renderer, meshObj, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this);
+            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);

@@ -21,13 +21,14 @@ const ALPHA = Math.PI / 6;
 async function Tip3DLayerBuilder() {
     const [
         watchUtils, GraphicsLayer, BaseLayerViewGL2D,
-        Extent, projection
+        Extent, projection,kernel
     ] = await esriLoader.loadModules([
         "esri/core/watchUtils",
         "esri/layers/GraphicsLayer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/geometry/Extent",
-        "esri/geometry/projection"
+        "esri/geometry/projection",
+        "esri/kernel"
     ]);
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         DEFAULT_SIZE: 50,
@@ -139,7 +140,7 @@ async function Tip3DLayerBuilder() {
             if (!renderInfos?.length) return;
             const gl = this.context;
             const {renderer, tipScene, tip, camera, light} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this);
+            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
 
             const aspect = viewport[2] / viewport[3];
             camera.left = - aspect;

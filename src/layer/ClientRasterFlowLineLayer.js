@@ -33,14 +33,14 @@ const WORKER_PATH = 'customWorkers/cjj-worker'
 async function ClientRasterFlowLineLayerBuilder() {
     const [
         Accessor, Layer,
-        BaseLayerViewGL2D, workers, projection, watchUtils
+        BaseLayerViewGL2D, workers, projection, kernel
     ] = await esriLoader.loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/core/workers",
         "esri/geometry/projection",
-        "esri/core/watchUtils"
+        "esri/kernel"
     ]);
     const FlowStyle = Accessor.createSubclass({
         constructor: function () {
@@ -308,7 +308,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             this.updateRenderParams(state);
 
             const {renderer, lineMesh, camera, composer, fs} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this);
+            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
             renderer.resetState();
             if (this.useBloom) {
                 if (composer.size[0] !== viewport[2] || composer.size[1] !== viewport[3]) {
