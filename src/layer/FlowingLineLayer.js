@@ -1,5 +1,5 @@
 import * as esriLoader from "esri-loader"
-import {doubleToTwoFloats, getApiVersion, getRenderTarget, id2RGBA, RGBA2Id} from "@src/utils";
+import {doubleToTwoFloats, getRenderTarget, id2RGBA, RGBA2Id} from "@src/utils";
 import {
     BufferGeometry,
     CustomBlending,
@@ -9,7 +9,8 @@ import {
     Mesh,
     NoBlending,
     OneMinusSrcAlphaFactor,
-    OrthographicCamera, RawShaderMaterial,
+    OrthographicCamera,
+    RawShaderMaterial,
     SrcAlphaFactor,
     Uint8ClampedBufferAttribute,
     Vector2,
@@ -35,6 +36,7 @@ const Flags = Object.freeze({
     appear: 'appear'
 })
 const WORKER_PATH = 'customWorkers/cjj-worker'
+
 async function FlowingLineLayerBuilder() {
     const [
         Color, Accessor, watchUtils, GraphicsLayer,
@@ -124,7 +126,7 @@ async function FlowingLineLayerBuilder() {
 
             let visibleWatcher = null;
             const handleDataChange = async () => {
-                if(this.destroyed) return;
+                if (this.destroyed) return;
 
                 {
                     this.hasData = false;
@@ -172,7 +174,7 @@ async function FlowingLineLayerBuilder() {
                 });
                 const meshes = await Promise.all(tasks._items);
 
-                if(this.destroyed) return;
+                if (this.destroyed) return;
                 if (_version !== this.version) {
                     this.updateFlags.clear();
                     return;
@@ -252,7 +254,7 @@ async function FlowingLineLayerBuilder() {
 
             const gl = this.context;
             const {renderer, lineMesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,ARCGIS_VERSION);
+            const {framebuffer, viewport} = getRenderTarget.call(this, ARCGIS_VERSION);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -268,7 +270,7 @@ async function FlowingLineLayerBuilder() {
             const dataChange = this.updateFlags.has(Flags.data),
                 appearChange = dataChange || this.updateFlags.has(Flags.appear);
 
-            const {vertexCount,indexCount} = this.meshes;
+            const {vertexCount, indexCount} = this.meshes;
             if (dataChange) {
                 lineMesh.geometry.dispose();
                 const geometry = lineMesh.geometry = new BufferGeometry();
@@ -471,11 +473,11 @@ async function FlowingLineLayerBuilder() {
 
         hitTest: function (...args) {
             let point;
-            if(ARCGIS_VERSION <= 4.21){
+            if (ARCGIS_VERSION <= 4.21) {
                 // (x, y)
                 const x = args[0], y = args[1];
                 point = this.view.toMap({x: x, y: y});
-            }else{
+            } else {
                 // (_mapPoint, screenPoint)
                 point = args[0];
             }

@@ -2,7 +2,6 @@ import * as esriLoader from "esri-loader"
 import {
     doubleToTwoFloats,
     genColorRamp,
-    getApiVersion,
     getRenderTarget,
     id2RGBA,
     near2PowMax,

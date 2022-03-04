@@ -1,14 +1,12 @@
-import {loadModules} from "esri-loader";
-
 export function doubleToTwoFloats(value) {
     let high, low, tempHigh;
     if (value >= 0) {
-        if(value < 65536) return [0, value];
+        if (value < 65536) return [0, value];
         tempHigh = Math.floor(value / 65536) * 65536;
         high = tempHigh;
         low = value - tempHigh;
     } else {
-        if(value > -65536) return [0, value];
+        if (value > -65536) return [0, value];
         tempHigh = Math.floor(-value / 65536) * 65536;
         high = -tempHigh;
         low = value + tempHigh;
@@ -66,15 +64,6 @@ export function genColorRamp(s, w, h) {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('png');
-}
-
-let __version = undefined;
-export async function getApiVersion(){
-    if(__version === undefined){
-        const [esriNS] = await loadModules(["esri/kernel"]);
-        __version = parseFloat(esriNS.version)
-    }
-    return __version;
 }
 
 export function getRenderTarget(version) {
