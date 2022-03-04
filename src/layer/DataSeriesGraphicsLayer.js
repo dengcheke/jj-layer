@@ -55,7 +55,7 @@ async function DataSeriesGraphicsLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
-    const ARCGIS_VERSION = await getApiVersion();
+    const ARCGIS_VERSION = parseFloat(kernel.version);
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
             this._handlers = [];
@@ -127,6 +127,7 @@ async function DataSeriesGraphicsLayerBuilder() {
             const renderOpts = layer.renderOpts;
             let visibleWatcher = null;
             const handleGraphicChanged = async () => {
+                if(this.destroyed) return;
                 {
                     this.layer.fullExtent = null;
                     visibleWatcher?.remove();
@@ -180,6 +181,8 @@ async function DataSeriesGraphicsLayerBuilder() {
                     }
                 })
                 const meshes = await Promise.all(task._items);
+
+                if(this.destroyed) return;
                 if (__version !== this.version) return;
                 this.meshes = meshes;
                 meshes.version = __version;
@@ -195,6 +198,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                 this.requestRender();
             };
             const dataHandle = () => {
+                if(this.destroyed) return;
                 const data = layer.data;
                 data.sort((a, b) => +a[0] - +b[0]);
                 const times = data.map(item => +item[0]);
@@ -276,9 +280,9 @@ async function DataSeriesGraphicsLayerBuilder() {
         },
 
         render: function (renderParameters) {
+            if(this.destroyed) return;
             const state = renderParameters.state;
             if (!this.layer.visible
-                || this.layer.destroyed
                 || !this.layer.renderOpts.valueRange
                 || !this.dataset
                 || !this.layer.graphics.length
@@ -296,7 +300,7 @@ async function DataSeriesGraphicsLayerBuilder() {
 
             const gl = this.context;
             const {renderer, meshObj, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
+            const {framebuffer, viewport} = getRenderTarget.call(this,ARCGIS_VERSION);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);

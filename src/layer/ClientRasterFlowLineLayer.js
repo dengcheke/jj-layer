@@ -42,6 +42,9 @@ async function ClientRasterFlowLineLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
+
+    await projection.load();
+
     const FlowStyle = Accessor.createSubclass({
         constructor: function () {
             this.density = 1;
@@ -161,14 +164,13 @@ async function ClientRasterFlowLineLayerBuilder() {
                     limitRange: [xmin, xmax, ymin, ymax]
                 }
             }
-            const updateData = async () => {
+            const updateData = () => {
                 const data = this.layer.data;
                 if (!data) return;
                 const _version = ++dataVersion;
                 const viewSR = this.view.spatialReference;
                 let extent = data.extent;
                 if (!viewSR.equals(extent)) {
-                    await projection.load();
                     extent = projection.project(extent, viewSR);
                 }
                 this.rasterData = {
@@ -182,15 +184,16 @@ async function ClientRasterFlowLineLayerBuilder() {
                 this.layer.fullExtent = extent;
             }
             const handleDataChange = async () => {
+                if (this.destroyed) return;
                 {
                     this.rasterData = null;
                     this.hasData = false;
                     this.layer.fullExtent = null;
                 }
-                isResolveData = true;
 
+                isResolveData = true;
                 try {
-                    await updateData();
+                    updateData();
                 } finally {
                     isResolveData = false;
                 }
@@ -219,6 +222,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 }
             }
             const updateBufferData = ({vertexBuffer, indexBuffer}, flag) => {
+                if (this.destroyed) return;
                 const curFlag = [dataVersion, calcVersion].join('_');
                 if (curFlag !== flag) return;
                 mesh.geometry.dispose();
@@ -235,6 +239,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             }
 
             const reCalcBuffer = debounce(async () => {
+                if (this.destroyed) return;
                 if (!this.rasterData) return;
                 const setting = getSetting();
                 if (!setting) return;
@@ -246,11 +251,13 @@ async function ClientRasterFlowLineLayerBuilder() {
 
             const renderOpts = layer.renderOpts;
             this._handlers.push(this.view.watch('scale,extent', () => {
+                if (this.destroyed) return;
                 if (isResolveData) return;
                 reCalcBuffer();
             }));
             this._handlers.push(layer.watch("data", handleDataChange));
             this._handlers.push(renderOpts.watch('density,lineLength,velocityScale', () => {
+                if (this.destroyed) return;
                 if (isResolveData) return;
                 reCalcBuffer();
             }));

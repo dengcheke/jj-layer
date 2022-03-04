@@ -35,6 +35,8 @@ async function ClientRasterColormapLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
+    await projection.load();
+
     const CMOpts = Accessor.createSubclass({
         constructor: function () {
             this.filterRange = null;
@@ -124,7 +126,8 @@ async function ClientRasterColormapLayerBuilder() {
             const {view, layer} = this;
             const renderOpts = layer.renderOpts;
             let version = 1;
-            const dataHandle = async () => {
+            const dataHandle = () => {
+                if(this.destroyed) return;
                 let data = layer.data;
                 if (!data) {
                     this.dataset = null;
@@ -132,7 +135,7 @@ async function ClientRasterColormapLayerBuilder() {
                 }
                 const __version = ++version;
                 const {cols, rows, dataArr, noDataValue = -9999, extent, flipY = true} = data;
-                const _extent = await projExtent(extent);
+                const _extent = projExtent(extent);
                 if (__version !== version) return;
 
                 const size = cols * rows;
@@ -165,11 +168,10 @@ async function ClientRasterColormapLayerBuilder() {
                 this.needUpdatePosition = true;
                 this.requestRender();
             }
-            const projExtent = async (extent) => {
+            const projExtent = extent => {
                 if (!extent) return;
                 const viewSR = this.view.spatialReference;
                 if (!viewSR.equals(extent)) {
-                    await projection.load();
                     return projection.project(extent, this.view.spatialReference);
                 }
                 return extent;
@@ -222,6 +224,7 @@ async function ClientRasterColormapLayerBuilder() {
         },
 
         render: function (renderParameters) {
+            if(this.destroyed) return;
             if (!this.layer.visible
                 || !this.layer.renderOpts.valueRange
                 || !this.dataset

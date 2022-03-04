@@ -50,7 +50,7 @@ async function FlowingLineLayerBuilder() {
         "esri/kernel"
     ]);
 
-    const ARCGIS_VERSION = await getApiVersion();
+    const ARCGIS_VERSION = parseFloat(kernel.version);
     const Trail = Accessor.createSubclass({
         declaredClass: 'custom.trail',
         constructor: function () {
@@ -124,7 +124,8 @@ async function FlowingLineLayerBuilder() {
 
             let visibleWatcher = null;
             const handleDataChange = async () => {
-                //clear before
+                if(this.destroyed) return;
+
                 {
                     this.hasData = false;
                     this.layer.fullExtent = null;
@@ -137,6 +138,7 @@ async function FlowingLineLayerBuilder() {
                 const viewSR = this.view.spatialReference;
                 let fullExtent = null;
                 const graphics = this.layer.graphics;
+
                 const connect = await workers.open(WORKER_PATH);
                 const tasks = graphics.map(async (g, idx) => {
                     let extent, mesh;
@@ -169,6 +171,8 @@ async function FlowingLineLayerBuilder() {
                     }
                 });
                 const meshes = await Promise.all(tasks._items);
+
+                if(this.destroyed) return;
                 if (_version !== this.version) {
                     this.updateFlags.clear();
                     return;
@@ -248,7 +252,7 @@ async function FlowingLineLayerBuilder() {
 
             const gl = this.context;
             const {renderer, lineMesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
+            const {framebuffer, viewport} = getRenderTarget.call(this,ARCGIS_VERSION);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);

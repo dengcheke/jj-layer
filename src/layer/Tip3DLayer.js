@@ -16,12 +16,11 @@ import {
 import {buildModule} from "@src/builder";
 import {getRenderTarget} from "@src/utils";
 
-const ALPHA = Math.PI / 6;
 
 async function Tip3DLayerBuilder() {
     const [
         watchUtils, GraphicsLayer, BaseLayerViewGL2D,
-        Extent, projection,kernel
+        Extent, projection, kernel
     ] = await esriLoader.loadModules([
         "esri/core/watchUtils",
         "esri/layers/GraphicsLayer",
@@ -30,6 +29,8 @@ async function Tip3DLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
+    await projection.load();
+    const ALPHA = Math.PI / 6;
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         DEFAULT_SIZE: 50,
         DEFAULT_COLOR: '#1980cc',
@@ -76,11 +77,11 @@ async function Tip3DLayerBuilder() {
                 renderer, light, camera, tip, tipScene
             });
             const viewSR = this.view.spatialReference;
-            const handleDataChange = async (change) => {
+            const handleDataChange = change => {
+                if (this.destroyed) return;
                 const adds = change.added ? [...change.added] : null;
                 const graphics = this.layer.graphics._items;
                 if (!graphics.length) return;
-                await projection.load();
                 adds && adds.forEach(({geometry}) => {
                     if (geometry.type !== 'point') return;
                     if (!viewSR.equals(geometry.spatialReference)) {
@@ -140,10 +141,10 @@ async function Tip3DLayerBuilder() {
             if (!renderInfos?.length) return;
             const gl = this.context;
             const {renderer, tipScene, tip, camera, light} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
+            const {framebuffer, viewport} = getRenderTarget.call(this, kernel.version);
 
             const aspect = viewport[2] / viewport[3];
-            camera.left = - aspect;
+            camera.left = -aspect;
             camera.right = aspect;
             camera.updateProjectionMatrix();
 

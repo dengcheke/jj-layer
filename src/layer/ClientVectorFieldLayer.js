@@ -37,6 +37,9 @@ async function ClientVectorFieldLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
+
+    await projection.load();
+
     const VFOpts = Accessor.createSubclass({
         declaredClass: 'custom.renderers.vectorField',
         constructor: function () {
@@ -155,7 +158,8 @@ async function ClientVectorFieldLayerBuilder() {
             const {view, layer} = this;
             const renderOpts = layer.renderOpts;
             let version = 1;
-            const dataHandle = async () => {
+            const dataHandle = () => {
+                if (this.destroyed) return;
                 let data = layer.data;
                 if (!data) {
                     this.dataset = null;
@@ -165,7 +169,7 @@ async function ClientVectorFieldLayerBuilder() {
                 const {cols, rows, dataArr, noDataValue = -9999, extent, flipY = true} = data;
                 if (!cols || !rows || !dataArr || !extent) throw new Error('invalid VectorField data');
 
-                const _extent = await projExtent(extent);
+                const _extent = projExtent(extent);
                 if (__version !== version) return;
                 const size = cols * rows * 2; // uv
                 dataArr.sort((a, b) => +a[0] - (+b[0]));
@@ -196,16 +200,16 @@ async function ClientVectorFieldLayerBuilder() {
                 this.needUpdatePosition = true;
                 this.requestRender();
             }
-            const projExtent = async (extent) => {
+            const projExtent = extent => {
                 if (!extent) return;
                 const viewSR = this.view.spatialReference;
                 if (!viewSR.equals(extent)) {
-                    await projection.load();
                     return projection.project(extent, this.view.spatialReference);
                 }
                 return extent;
             }
             const colorStopsHandle = () => {
+                if (this.destroyed) return;
                 let v = renderOpts.colorStops;
                 if (!v) {
                     console.warn('colorStops is empty')
@@ -222,6 +226,7 @@ async function ClientVectorFieldLayerBuilder() {
                 })
             }
             const arrowImgHandle = () => {
+                if (this.destroyed) return;
                 const v = renderOpts.arrowImg;
                 if (!v) {
                     console.warn('arrowImg is empty')
@@ -285,6 +290,7 @@ async function ClientVectorFieldLayerBuilder() {
         },
 
         render: function (renderParameters) {
+            if (this.destroyed) return;
             if (!this.layer.visible
                 || !this.layer.renderOpts.valueRange
                 || !this.dataset
