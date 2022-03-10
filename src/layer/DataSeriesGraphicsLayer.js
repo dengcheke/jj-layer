@@ -139,6 +139,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const graphics = this.layer.graphics;
                 const task = graphics.map(async (g, idx) => {
                     if(g.geometry.cache.mesh){
+                        g._valIndex = idx;
                         return {
                             mesh: g.geometry.cache.mesh,
                             graphic: g,

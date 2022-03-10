@@ -10,14 +10,15 @@ interface DataSeriesRenderOpts {
 
 interface DataSeriesGraphicsLayerProperties extends __esri.GraphicsLayerProperties {
     renderOpts?: DataSeriesRenderOpts,
-    curTime?:number,
+    curTime?: number,
     data?: TimeSeriesRasterBufferSet
 }
 
 interface DataSeriesGraphicsLayer extends GraphicsLayer {
     renderOpts: DataSeriesRenderOpts,
-    curTime:number,
-    data: TimeSeriesRasterBufferSet
+    curTime: number,
+    data: TimeSeriesRasterBufferSet,
+    getDataByIndex(graphic_valIndex:number): Array<[number, number]>
 }
 
 export declare function loadDataSeriesGraphicsLayer(opts?: DataSeriesGraphicsLayerProperties): Promise<DataSeriesGraphicsLayer>
