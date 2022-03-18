@@ -11,7 +11,7 @@ Vue.use(ElementUI);
 import EleRwDialog from './common/ele-rw-dialog';
 
 Vue.component('EleRwDialog', EleRwDialog);
-setDefaultOptions({ version: '4.19' });
+setDefaultOptions({ version: '4.18' });
 async function initEsriConfig() {
     const [config] = await loadModules(["esri/config"]);
     Object.assign(config.workers.loaderConfig.paths,{

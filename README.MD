@@ -50,6 +50,7 @@ const [Map,MapView] = await loadModules(["esri/Map","esri/views/MapView"])
 const map = new Map(), view = new MapView({map});
 const buffer = (await axios.get("/uv_822x1078", {responseType: 'arraybuffer'})).data;            
 const layer = await loadFlowingLineLayer({
+    effect: "bloom(1.5, 1px, 0.0)",
     renderOpts: {
         density: 1,
         fadeDuration: 100,
@@ -57,11 +58,6 @@ const layer = await loadFlowingLineLayer({
         lineLength: 200,
         lineSpeed: 5,
         lineWidth: 4,
-        bloom: {
-            strength: 1.5,
-            threshold: 0,
-            radius: 1,
-        } // set bloom = null to close bloom effect
     }, //optional
     data:{
         data: new Float32Array(buffer), // [u1,v1, u2,v2, u3,v3, ....],

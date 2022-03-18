@@ -8,7 +8,7 @@
     "build": "npm run build-esm && npm run build-cjs && npm run build-worker && npm run copy",
     "build-esm": "rimraf ./dist/esm && rollup -c build/rollup.esm.js",
     "build-cjs": "rimraf ./dist/cjs && node build/rollup.cjs.js",
-    "build-worker": "rimraf ./dist/workers && node build/build-worker.js",
+    "build-worker": "rimraf ./dist/workers && node build/build-worker.js && ncp ./dist/workers/cjj-worker.js ./static/workers/cjj-worker.js",
     "copy": "ncp ./src/types ./dist/types && ncp ./README.MD ./dist/README.MD"
   },
   "keywords": [

@@ -3,28 +3,26 @@ import {getRenderTarget} from "@src/utils";
 import {debounce} from 'lodash'
 import {
     AdditiveBlending,
-    BufferGeometry,
     Color,
     DoubleSide,
-    InterleavedBuffer,
-    InterleavedBufferAttribute,
+    InstancedBufferAttribute,
     MathUtils,
     Matrix3,
-    Mesh,
     OrthographicCamera,
     RawShaderMaterial,
     ShaderMaterial,
-    Uint32BufferAttribute,
     UniformsUtils,
     Vector2,
     WebGLRenderer,
 } from 'three'
+import {buildModule} from "@src/builder";
+import {RasterFlowLine2FragShader, RasterFlowLine2VertexShader} from "@src/layer/glsl/RasterFlowLine2.glsl";
+import {LineSegments2} from 'three/examples/jsm/lines/LineSegments2'
+import {LineSegmentsGeometry} from 'three/examples/jsm/lines/LineSegmentsGeometry'
 import {UnrealBloomPass} from "three/examples/jsm/postprocessing/UnrealBloomPass";
 import {RenderPass} from "three/examples/jsm/postprocessing/RenderPass";
 import {FullScreenQuad} from "three/examples/jsm/postprocessing/Pass";
 import {EffectComposer} from "three/examples/jsm/postprocessing/EffectComposer";
-import {buildModule} from "@src/builder";
-import {RasterFlowLineFragShader, RasterFlowLineVertexShader} from "@src/layer/glsl/RasterFlowLine.glsl";
 import {CopyShader} from "three/examples/jsm/shaders/CopyShader";
 
 const _mat3 = new Matrix3();
@@ -44,7 +42,7 @@ async function ClientRasterFlowLineLayerBuilder() {
     ]);
 
     await projection.load();
-
+    const apiVersion = parseFloat(kernel.version);
     const FlowStyle = Accessor.createSubclass({
         constructor: function () {
             this.density = 1;
@@ -54,21 +52,20 @@ async function ClientRasterFlowLineLayerBuilder() {
             this.lineSpeed = 10;
             this.lineWidth = 4;
             this.velocityScale = 1;
-            this.bloom = {
-                strength: 1.5,
-                threshold: 0,
-                radius: 1
-            }
         },
         properties: {
-            bloom: {},
             density: {},
             fadeDuration: {},
             lineColor: {},
             lineLength: {},
             lineSpeed: {},
             lineWidth: {},
-            velocityScale: {}
+            velocityScale: {},
+            bloom: {
+                set() {
+                    console.warn('ClientRasterFlowLineLayer: renderOpts.bloom has been deprecated. Use layer.effect instead.')
+                }
+            }
         }
     });
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
@@ -76,10 +73,13 @@ async function ClientRasterFlowLineLayerBuilder() {
             this._handlers = [];
             this.rasterData = null;
             this.hasData = false;
-            this.useBloom = true;
+
+            //for <= 4.18
+            this.useBloom = false;
         },
 
         attach: function () {
+            //init
             const renderer = this.renderer = new WebGLRenderer({
                 canvas: this.context.canvas,
                 gl: this.context,
@@ -102,34 +102,123 @@ async function ClientRasterFlowLineLayerBuilder() {
                     u_lineWidth: {value: 4},
                 },
                 side: DoubleSide,
-                vertexShader: RasterFlowLineVertexShader,
-                fragmentShader: RasterFlowLineFragShader
+                vertexShader: RasterFlowLine2VertexShader,
+                fragmentShader: RasterFlowLine2FragShader
             });
-            const mesh = this.lineMesh = new Mesh(new BufferGeometry(), material);
+            const mesh = this.lineMesh = new LineSegments2(new LineSegmentsGeometry(), material);
+            this._handlers.push({
+                remove: () => {
+                    mesh.material.dispose();
+                    mesh.geometry.dispose();
+                    renderer.dispose();
+                    this.lineMesh = null;
+                    this.camera = null;
+                    this.renderer = null;
+                    this.rasterData = null;
+                    this.composer = null;
+                }
+            });
 
-            const bloomPass = new UnrealBloomPass(new Vector2(1, 1), 1.5, 1, 0);
-            const renderScene = new RenderPass(mesh, this.camera);
-            const composer = this.composer = new EffectComposer(renderer);
-            composer.renderToScreen = false;
-            composer.size = [this.context.drawingBufferWidth, this.context.drawingBufferHeight]
-            composer.setSize(composer.size[0], composer.size[1])
-            composer.addPass(renderScene);
-            composer.addPass(bloomPass);
-            this.fs = new FullScreenQuad(new ShaderMaterial({
-                uniforms: UniformsUtils.clone(CopyShader.uniforms),
-                vertexShader: CopyShader.vertexShader,
-                fragmentShader: CopyShader.fragmentShader,
-                blending: AdditiveBlending,
-                depthTest: false,
-                depthWrite: false,
-                transparent: true
-            }));
+            //when <=4.18 The layer.effect does not take effect, use custom bloom composer,
+            if (apiVersion <= 4.18) {
+                const bloomPass = new UnrealBloomPass(new Vector2(1, 1), 1.5, 1, 0);
+                const renderScene = new RenderPass(mesh, this.camera);
+                const composer = this.composer = new EffectComposer(renderer);
+                composer.renderToScreen = false;
+                composer.size = [this.context.drawingBufferWidth, this.context.drawingBufferHeight];
+                composer.setSize(composer.size[0], composer.size[1]);
+                composer.addPass(renderScene);
+                composer.addPass(bloomPass);
+                const fs = new FullScreenQuad(new ShaderMaterial({
+                    uniforms: UniformsUtils.clone(CopyShader.uniforms),
+                    vertexShader: CopyShader.vertexShader,
+                    fragmentShader: CopyShader.fragmentShader,
+                    blending: AdditiveBlending,
+                    depthTest: false,
+                    depthWrite: false,
+                    transparent: true
+                }));
+                this.bloomRelatives = {
+                    bloomPass, composer, fs
+                }
 
+                let _animTimer = 0;
+                const DISABLE_BLOOM = Object.freeze({
+                    strength: 0,
+                    radius: 0,
+                    threshold: 0
+                })
+                const parseBloom = (str) => {
+                    if (!str) return DISABLE_BLOOM;
+                    const matches = str.match(/bloom\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)px\s*,\s*(\d+(?:\.\d+)?)\s*\)/);
+                    if (!matches) return DISABLE_BLOOM;
+                    const [_, strength, radius, threshold] = matches;
+                    const res = {
+                        strength: Math.max(strength, 0),
+                        radius: Math.max(radius, 0),
+                        threshold: Math.max(threshold, 0),
+                    }
+                    res.enable = !!res.strength;
+                    return res;
+                }
+                const setBloom = (p) => {
+                    bloomPass.strength = p.strength;
+                    bloomPass.threshold = p.threshold;
+                    bloomPass.radius = p.radius;
+                    this.useBloom = !!p.strength;
+                    this.requestRender();
+                }
+                const handleBloomChange = (curv, oldv) => {
+                    const old = parseBloom(oldv);
+                    const cur = parseBloom(curv);
+                    if (old.enable !== cur.enable) {
+                        anim(old, cur, 166)
+                    } else {
+                        cancelAnimationFrame(_animTimer);
+                        setBloom(cur);
+                    }
+                }
+                const anim = (from, to, dur) => {
+                    cancelAnimationFrame(_animTimer);
+                    let walkTime = 0, curTime = performance.now();
+                    _animTimer = requestAnimationFrame(function step() {
+                        const now = performance.now()
+                        walkTime += now - curTime;
+                        curTime = now;
+                        const per = Math.min(walkTime / dur, 1);
+                        if (per === 1) {
+                            setBloom(to);
+                        } else {
+                            setBloom({
+                                strength: MathUtils.lerp(from.strength, to.strength, per),
+                                radius: MathUtils.lerp(from.radius, to.radius, per),
+                                threshold: to.threshold
+                            });
+                            _animTimer = requestAnimationFrame(step)
+                        }
+                    })
+                }
+                this._handlers.push(this.layer.watch('effect', handleBloomChange));
+                this._handlers.push({
+                    remove: () => {
+                        cancelAnimationFrame(_animTimer);
+                        fs.dispose();
+                        bloomPass.dispose();
+                        this.bloomRelatives = null;
+                    }
+                });
+                handleBloomChange(this.layer.effect, null);
+            }
+
+            //bind event
             const {layer} = this;
-            const flowStyle = layer.renderOpts;
-            let dataVersion = 0, calcVersion = 0, isResolveData = false;
+            const renderOpts = layer.renderOpts;
+            let dataVersion = 0, calcVersion = 0;
+            const getToken = () => {
+                return [dataVersion, calcVersion].join('_');
+            }
             const getSetting = () => {
-                const lineWidth = flowStyle.lineWidth || 1;
+                const lineWidth = renderOpts.lineWidth || 1;
                 const {extent, width, height} = this.rasterData;
 
                 const disPerCell = extent.width / width;
@@ -140,7 +229,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 const limitExtent = this.view.state.extent.clone();
                 const intersect = limitExtent.intersection(extent);
                 if (!intersect) return false;
-                limitExtent.expand(1.2)
+                limitExtent.expand(1.2);
                 limitExtent.intersection(extent);
                 const xmin = MathUtils.clamp((limitExtent.xmin - extent.xmin) / disPerCell, 0, width);
                 const xmax = MathUtils.clamp((limitExtent.xmax - extent.xmin) / disPerCell, 0, width);
@@ -148,15 +237,15 @@ async function ClientRasterFlowLineLayerBuilder() {
                 const ymax = MathUtils.clamp((extent.ymax - limitExtent.ymin) / disPerCell, 0, height);
                 if (xmax === xmin || ymax === ymin) return false;
                 return {
-                    density: Math.max(flowStyle.density || 0.01),
-                    fadeDuration: flowStyle.fadeDuration,
+                    density: Math.max(renderOpts.density || 0.01),
+                    fadeDuration: renderOpts.fadeDuration,
                     lineCollisionWidth: lineCellWidth,
                     lineSpacing: spacing,
-                    lineSpeed: flowStyle.lineSpeed,
+                    lineSpeed: renderOpts.lineSpeed,
                     segmentLength: Math.max(lineCellWidth, 1) * 2,
-                    verticesPerLine: Math.round(flowStyle.lineLength / 2 / lineWidth) + 1,
+                    verticesPerLine: Math.round(renderOpts.lineLength / 2 / lineWidth) + 1,
 
-                    velocityScale: flowStyle.velocityScale || 1,
+                    velocityScale: renderOpts.velocityScale || 1,
                     maxTurnAngle: 1,
                     mergeLines: true,
                     minSpeedThreshold: 0.001,
@@ -166,8 +255,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             }
             const updateData = () => {
                 const data = this.layer.data;
-                if (!data) return;
-                const _version = ++dataVersion;
+                if (!data) return false;
                 const viewSR = this.view.spatialReference;
                 let extent = data.extent;
                 if (!viewSR.equals(extent)) {
@@ -178,123 +266,77 @@ async function ClientRasterFlowLineLayerBuilder() {
                     width: data.cols,
                     height: data.rows,
                     extent: extent,
-                    version: _version,
+                    version: dataVersion,
                     noDataValue: data.noDataValue || undefined
                 }
                 this.layer.fullExtent = extent;
-            }
-            const handleDataChange = async () => {
-                if (this.destroyed) return;
-                {
-                    this.rasterData = null;
-                    this.hasData = false;
-                    this.layer.fullExtent = null;
-                }
-
-                isResolveData = true;
-                try {
-                    updateData();
-                } finally {
-                    isResolveData = false;
-                }
-
-                if (this.rasterData?.version !== dataVersion) return;
-                const flag = [dataVersion, ++calcVersion].join('_');
-                const setting = getSetting();
-                if (!setting) return;
-                const bufferData = await computeBufferData(setting);
-                const updated = updateBufferData(bufferData, flag);
-                updated && this.requestRender();
-            }
-
-            const computeBufferData = async setting => {
-                /*const {vertexBuffer, indexBuffer} = this.syncCreateRasterFlowLineMesh({
-                    data:this.rasterData,
-                    setting:setting
-                });*/
-                const {vertexBuffer, indexBuffer} = await this.asyncCreateRasterFlowLineMesh({
-                    data: this.rasterData,
-                    setting: setting
-                })
-                return {
-                    vertexBuffer: new Float32Array(vertexBuffer),
-                    indexBuffer: new Uint32Array(indexBuffer)
-                }
-            }
-            const updateBufferData = ({vertexBuffer, indexBuffer}, flag) => {
-                if (this.destroyed) return;
-                const curFlag = [dataVersion, calcVersion].join('_');
-                if (curFlag !== flag) return;
-                mesh.geometry.dispose();
-                if (!indexBuffer.length) return;
-                const buffer = new InterleavedBuffer(vertexBuffer, 8);
-                mesh.geometry = new BufferGeometry()
-                    .setAttribute('a_position', new InterleavedBufferAttribute(buffer, 2, 0))
-                    .setAttribute('a_side', new InterleavedBufferAttribute(buffer, 1, 2))
-                    .setAttribute('a_extrude', new InterleavedBufferAttribute(buffer, 2, 3))
-                    .setAttribute('a_timeInfo', new InterleavedBufferAttribute(buffer, 3, 5))
-                mesh.geometry.setIndex(new Uint32BufferAttribute(indexBuffer, 1));
-                this.hasData = !!indexBuffer.length;
                 return true;
             }
 
-            const reCalcBuffer = debounce(async () => {
+            const computeBufferData = async setting => {
+                const res = await this.asyncCreateRasterFlowLineMesh({
+                    data: this.rasterData,
+                    setting: setting
+                })
+                /*const res = this.syncCreateRasterFlowLineMesh({
+                    data: this.rasterData,
+                    setting: setting
+                });*/
+                return res;
+            }
+            const updateBufferData = ({buffer1, buffer2, buffer3}) => {
                 if (this.destroyed) return;
-                if (!this.rasterData) return;
+                mesh.geometry.dispose();
+                mesh.geometry = new LineSegmentsGeometry()
+                    .setAttribute('instance_p0_p1',
+                        new InstancedBufferAttribute(buffer1, 4))
+                    .setAttribute('instance_p2_p3',
+                        new InstancedBufferAttribute(buffer2, 4))
+                    .setAttribute('instance_timeInfo',
+                        new InstancedBufferAttribute(buffer3, 4));
+                this.hasData = !!buffer1.length;
+                return true;
+            }
+
+            const reCalcBuffer = debounce(token => {
+                if (token !== getToken()) return;
                 const setting = getSetting();
                 if (!setting) return;
-                const bufferData = await computeBufferData(setting);
-                const flag = [dataVersion, ++calcVersion].join('_');
-                const updated = updateBufferData(bufferData, flag);
-                updated && this.requestRender();
-            }, 1500, {leading: false, trailing: true})
+                computeBufferData(setting).then(bufferData => {
+                    if (token !== getToken()) return;
+                    const updated = updateBufferData(bufferData);
+                    updated && this.requestRender();
+                });
+            }, 200, {leading: false, trailing: true})
 
-            const renderOpts = layer.renderOpts;
-            this._handlers.push(this.view.watch('scale,extent', () => {
+            const handleDataChange = () => {
                 if (this.destroyed) return;
-                if (isResolveData) return;
-                reCalcBuffer();
-            }));
-            this._handlers.push(layer.watch("data", handleDataChange));
-            this._handlers.push(renderOpts.watch('density,lineLength,velocityScale', () => {
-                if (this.destroyed) return;
-                if (isResolveData) return;
-                reCalcBuffer();
-            }));
-            const handleBloomChange = () => {
-                const params = this.layer.renderOpts.bloom;
-                if (params) {
-                    this.useBloom = true;
-                    bloomPass.strength = params.strength;
-                    bloomPass.threshold = params.threshold;
-                    bloomPass.radius = params.radius;
-                } else {
-                    this.useBloom = false;
-                }
-                this.requestRender()
+                this.rasterData = null;
+                this.hasData = false;
+                this.layer.fullExtent = null;
+                dataVersion++;
+                calcVersion = 0;
+                const flag = updateData();
+                flag && reCalcBuffer(getToken());
             }
-            this._handlers.push(renderOpts.watch('bloom', handleBloomChange));
+
+            const reCalcHandler = () => {
+                if (this.destroyed || !this.rasterData) return;
+                calcVersion++;
+                reCalcBuffer(getToken());
+            }
+
+            this._handlers.push(this.view.watch('scale,extent', reCalcHandler));
+            this._handlers.push(renderOpts.watch('density,lineLength,velocityScale', reCalcHandler));
+            this._handlers.push(layer.watch("data", handleDataChange));
+
             const handleAppearChange = () => {
                 material.uniforms.u_lineSpeed.value = renderOpts.lineSpeed || 1;
                 material.uniforms.u_fadeDuration.value = renderOpts.fadeDuration || 10;
                 this.requestRender()
             }
             this._handlers.push(renderOpts.watch('fadeDuration,lineSpeed',
-                debounce(handleAppearChange, 200, {leading: false, trailing: true})))
-            this._handlers.push({
-                remove: () => {
-                    bloomPass.dispose();
-                    mesh.material.dispose();
-                    mesh.geometry.dispose();
-                    this.renderer.dispose();
-                    this.lineMesh = null;
-                    this.camera = null;
-                    this.renderer = null;
-                    this.rasterData = null;
-                    this.composer = null;
-                }
-            });
-            handleBloomChange();
+                debounce(handleAppearChange, 200, {leading: false, trailing: true})));
             this.layer.data && handleDataChange();
         },
 
@@ -308,25 +350,29 @@ async function ClientRasterFlowLineLayerBuilder() {
             if (!this.hasData || !this.layer.visible) return;
             const extent = this.rasterData?.extent;
             if (!this.layer.visible
-                || !this.hasData
                 || !extent
                 || !this.view.extent.intersects(extent)
             ) return
             this.updateRenderParams(state);
-
-            const {renderer, lineMesh, camera, composer, fs} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
+            const {renderer, lineMesh, camera} = this;
+            const {framebuffer, viewport} = getRenderTarget.call(this, apiVersion);
             renderer.resetState();
-            if (this.useBloom) {
-                if (composer.size[0] !== viewport[2] || composer.size[1] !== viewport[3]) {
-                    composer.setSize(viewport[2], viewport[3]);
-                    composer.size = [viewport[2], viewport[3]];
+
+            if (apiVersion <= 4.18 && this.useBloom) {
+                const {composer} = this.bloomRelatives;
+                const [w, h] = state.size, dpr = state.pixelRatio;
+                if (composer._width !== w || composer._height !== h || composer._pixelRatio !== dpr) {
+                    composer.setSize(w, h);
+                    composer.setPixelRatio(dpr);
                 }
                 composer.render();
             }
+
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(this.context.FRAMEBUFFER, framebuffer);
-            if (this.useBloom) {
+
+            if (apiVersion <= 4.18 && this.useBloom) {
+                const {fs, composer} = this.bloomRelatives;
                 fs.material.uniforms.tDiffuse.value = composer.readBuffer.texture;
                 fs.render(renderer);
             } else {
@@ -378,130 +424,52 @@ async function ClientRasterFlowLineLayerBuilder() {
         syncCreateRasterFlowLineMesh({data, setting}) {
             const sampler = createSampler(data);
             const paths = buildRasterPaths(setting, sampler, data.width, data.height);
-            //TODO: optimize, merge 2 step to 1, output buffer directly
-            const meshes = paths.map(path => {
-                const mesh = tessellatePath(path);
-                return {mesh, path}
-            })
-            const {indexData, vertexData} = toBuffer(meshes);
-            return {
-                vertexBuffer: vertexData.buffer,
-                indexBuffer: indexData.buffer
-            }
+            return toBuffer(paths)
 
-            function toBuffer(meshes) {
-                let vCount = 0, iCount = 0;
-                for (let i = 0; i < meshes.length; i++) {
-                    const mesh = meshes[i].mesh;
-                    vCount += mesh.vertexs.length;
-                    iCount += mesh.indices.length;
+            function toBuffer(paths) {
+                let segmentCount = 0;
+                for (let i = 0; i < paths.length; i++) {
+                    segmentCount += paths[i].length - 1;
                 }
-
-                const vBuffer = new Float32Array(vCount * 8);
-                const iBuffer = new Uint32Array(iCount);
-
-                let currentVertex = 0;
-                let currentIndex = 0;
-
-                for (let i = 0; i < meshes.length; i++) {
-                    const {mesh, path} = meshes[i];
-                    const {vertexs, indices} = mesh;
+                const n = segmentCount * 4;
+                const buffer1 = new Float32Array(n);
+                const buffer2 = new Float32Array(n);
+                const buffer3 = new Float32Array(n);
+                let cursor = 0;
+                for (let i = 0; i < paths.length; i++) {
+                    const path = paths[i];
                     const totalTime = path[path.length - 1].t;
                     const timeSeed = Math.random();
-                    for (let k = 0; k < indices.length; k++) {
-                        iBuffer[currentIndex] = currentVertex + indices[k];
-                        currentIndex++;
-                    }
-                    for (let j = 0; j < vertexs.length; j++) {
-                        const point = vertexs[j];
-                        const s = currentVertex * 8;
-                        vBuffer[s] = point.x;
-                        vBuffer[s + 1] = point.y;
-                        vBuffer[s + 2] = point.side;
-                        vBuffer[s + 3] = point.offsetX;
-                        vBuffer[s + 4] = point.offsetY;
-                        vBuffer[s + 5] = point.time;
-                        vBuffer[s + 6] = totalTime;
-                        vBuffer[s + 7] = timeSeed;
-                        currentVertex++;
+                    const pointCount = path.length;
+                    for (let j = 0, limit = pointCount - 2; j <= limit; j++) {
+                        const c = cursor * 4;
+                        const c1 = c + 1, c2 = c + 2, c3 = c + 3;
+                        const p0 = j === 0 ? path[0] : path[j - 1];
+                        const p1 = path[j];
+                        const p2 = path[j + 1];
+                        const p3 = j === limit ? path[j + 1] : path[j + 2];
+                        buffer1[c] = p0.x;
+                        buffer1[c1] = p0.y;
+                        buffer1[c2] = p1.x;
+                        buffer1[c3] = p1.y;
+
+                        buffer2[c] = p2.x;
+                        buffer2[c1] = p2.y;
+                        buffer2[c2] = p3.x;
+                        buffer2[c3] = p3.y;
+
+                        buffer3[c] = p1.t;
+                        buffer3[c1] = p2.t;
+                        buffer3[c2] = totalTime;
+                        buffer3[c3] = timeSeed;
+                        cursor++;
                     }
                 }
                 return {
-                    vertexData: vBuffer,
-                    indexData: iBuffer
+                    buffer1,
+                    buffer2,
+                    buffer3,
                 }
-            }
-
-            function tessellatePath(path, miterLimit = 10) {
-                const vertexs = [];
-                const indices = [];
-                const lastPoint = new Vector2();
-                const lastDir = new Vector2();
-                let lastTime = null;
-                let cursor = 0;
-                for (let i = 0; i < path.length; i++) {
-                    const point = path[i];
-                    const {x, y, t: time} = point;
-                    const curDir = new Vector2(null, null);
-                    const offset = new Vector2(null, null);
-                    if (i > 0) {
-                        curDir.set(x, y).sub(lastPoint).normalize();
-                        if (i > 1) {
-                            const half = new Vector2()
-                                .addVectors(curDir, lastDir)
-                                .normalize();
-                            const scale = Math.min(1 / (half.dot(curDir)), miterLimit);
-                            offset.set(-half.y, half.x).multiplyScalar(scale);
-                        } else {
-                            offset.set(-curDir.y, curDir.x);
-                        }
-                        if (null !== offset.x && null !== offset.y) {
-                            vertexs.push({
-                                x: lastPoint.x,
-                                y: lastPoint.y,
-                                side: 1,
-                                offsetX: offset.x,
-                                offsetY: offset.y,
-                                time: lastTime,
-                            }, {
-                                x: lastPoint.x,
-                                y: lastPoint.y,
-                                side: -1,
-                                offsetX: -offset.x,
-                                offsetY: -offset.y,
-                                time: lastTime,
-                            })
-                            indices.push(
-                                cursor,
-                                cursor + 1,
-                                cursor + 2,
-                                cursor + 1,
-                                cursor + 3,
-                                cursor + 2,
-                            )
-                            cursor += 2;
-                        }
-                    }
-                    lastPoint.set(x, y);
-                    lastDir.copy(curDir);
-                    lastTime = time;
-                }
-                vertexs.push({
-                    x: lastPoint.x,
-                    y: lastPoint.y,
-                    side: 1,
-                    offsetX: -lastDir.y,
-                    offsetY: lastDir.x,
-                    time: lastTime,
-                }, {
-                    x: lastPoint.x,
-                    y: lastPoint.y,
-                    side: -1,
-                    offsetX: lastDir.y,
-                    offsetY: -lastDir.x,
-                    time: lastTime,
-                });
-                return {vertexs, indices}
             }
 
             function buildRasterPaths(setting, sampler, width, height) {
@@ -638,7 +606,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             const {data: buffer, width, height, noDataValue} = data;
             const pixels = new Float32Array(buffer);
             const connect = await workers.open(WORKER_PATH);
-            const {vertexBuffer, indexBuffer} = await connect.invoke(
+            const {buffer1, buffer2, buffer3} = await connect.invoke(
                 'createRasterFlowLineMesh',
                 {
                     data: {
@@ -651,7 +619,12 @@ async function ClientRasterFlowLineLayerBuilder() {
                 }, {
                     transferList: [pixels.buffer]
                 });
-            return {vertexBuffer, indexBuffer}
+            connect.close();
+            return {
+                buffer1: new Float32Array(buffer1),
+                buffer2: new Float32Array(buffer2),
+                buffer3: new Float32Array(buffer3),
+            }
         }
     });
     return Layer.createSubclass({
@@ -675,7 +648,8 @@ async function ClientRasterFlowLineLayerBuilder() {
                     Object.assign(this._flowStyle, v || {});
                 }
             },
-            data: {}
+            data: {},
+            effect: {}
         },
         createLayerView: function (view) {
             if (view.type === "2d") {

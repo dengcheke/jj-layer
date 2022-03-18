@@ -2,13 +2,15 @@ define([
     "esri/geometry/geometryEngine",
     "esri/geometry/projection",
     "esri/geometry/SpatialReference"
-],(geometryEngine,projection,SpatialReference)=>{
+], (geometryEngine, projection, SpatialReference) => {
     function mix(x, y, a) {
         return x + (y - x) * a;
     }
-    function clamp( value, min, max ) {
-        return Math.max( min, Math.min( max, value ) );
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
     }
+
     class Vector2 {
         constructor(x = 0, y = 0) {
 
@@ -186,6 +188,7 @@ define([
             return this;
         }
     }
+
     const RadToDeg = 180 / Math.PI;
 
     function tessellateLineRound(geometry) {
@@ -458,129 +461,64 @@ define([
         data.data = new Float32Array(data.data);
         const sampler = createSampler(data);
         const paths = buildRasterPaths(setting, sampler, data.width, data.height);
-        const meshes = paths.map(path => {
-            const mesh = tessellatePath(path);
-            return {mesh, path}
-        })
-        const {indexData, vertexData} = toBuffer(meshes);
+        const {buffer1, buffer2, buffer3} = toBuffer(paths);
         return {
-            vertexBuffer: vertexData.buffer,
-            indexBuffer: indexData.buffer
+            result:{
+                buffer1: buffer1.buffer,
+                buffer2: buffer2.buffer,
+                buffer3: buffer3.buffer,
+            },
+            transferList:[
+                buffer1.buffer,
+                buffer2.buffer,
+                buffer3.buffer,
+            ]
         }
 
-        function toBuffer(meshes) {
-            let vCount = 0, iCount = 0;
-            for (let i = 0; i < meshes.length; i++) {
-                const mesh = meshes[i].mesh;
-                vCount += mesh.vertexs.length;
-                iCount += mesh.indices.length;
+        function toBuffer(paths) {
+            let segmentCount = 0;
+            for (let i = 0; i < paths.length; i++) {
+                segmentCount += paths[i].length - 1;
             }
-
-            const vBuffer = new Float32Array(vCount * 8);
-            const iBuffer = new Uint32Array(iCount);
-
-            let currentVertex = 0;
-            let currentIndex = 0;
-
-            for (let i = 0; i < meshes.length; i++) {
-                const {mesh, path} = meshes[i];
-                const {vertexs, indices} = mesh;
+            const n = segmentCount * 4;
+            const buffer1 = new Float32Array(n);
+            const buffer2 = new Float32Array(n);
+            const buffer3 = new Float32Array(n);
+            let cursor = 0;
+            for (let i = 0; i < paths.length; i++) {
+                const path = paths[i];
                 const totalTime = path[path.length - 1].t;
                 const timeSeed = Math.random();
-                for (let k = 0; k < indices.length; k++) {
-                    iBuffer[currentIndex] = currentVertex + indices[k];
-                    currentIndex++;
-                }
-                for (let j = 0; j < vertexs.length; j++) {
-                    const point = vertexs[j];
-                    const s = currentVertex * 8;
-                    vBuffer[s] = point.x;
-                    vBuffer[s + 1] = point.y;
-                    vBuffer[s + 2] = point.side;
-                    vBuffer[s + 3] = point.offsetX;
-                    vBuffer[s + 4] = point.offsetY;
-                    vBuffer[s + 5] = point.time;
-                    vBuffer[s + 6] = totalTime;
-                    vBuffer[s + 7] = timeSeed;
-                    currentVertex++;
+                const pointCount = path.length;
+                for (let j = 0, limit = pointCount - 2; j <= limit; j++) {
+                    const c = cursor * 4;
+                    const c1 = c + 1, c2 = c + 2, c3 = c + 3;
+                    const p0 = j === 0 ? path[0] : path[j - 1];
+                    const p1 = path[j];
+                    const p2 = path[j + 1];
+                    const p3 = j === limit ? path[j + 1] : path[j + 2];
+                    buffer1[c] = p0.x;
+                    buffer1[c1] = p0.y;
+                    buffer1[c2] = p1.x;
+                    buffer1[c3] = p1.y;
+
+                    buffer2[c] = p2.x;
+                    buffer2[c1] = p2.y;
+                    buffer2[c2] = p3.x;
+                    buffer2[c3] = p3.y;
+
+                    buffer3[c] = p1.t;
+                    buffer3[c1] = p2.t;
+                    buffer3[c2] = totalTime;
+                    buffer3[c3] = timeSeed;
+                    cursor++;
                 }
             }
             return {
-                vertexData: vBuffer,
-                indexData: iBuffer
+                buffer1,
+                buffer2,
+                buffer3,
             }
-        }
-
-        function tessellatePath(path, miterLimit = 10) {
-            const vertexs = [];
-            const indices = [];
-            const lastPoint = new Vector2();
-            const lastDir = new Vector2();
-            let lastTime = null;
-            let cursor = 0;
-            for (let i = 0; i < path.length; i++) {
-                const point = path[i];
-                const {x, y, t: time} = point;
-                const curDir = new Vector2(null, null);
-                const offset = new Vector2(null, null);
-                if (i > 0) {
-                    curDir.set(x, y).sub(lastPoint).normalize();
-                    if (i > 1) {
-                        const half = new Vector2()
-                            .addVectors(curDir, lastDir)
-                            .normalize();
-                        const scale = Math.min(1 / (half.dot(curDir)), miterLimit);
-                        offset.set(-half.y, half.x).multiplyScalar(scale);
-                    } else {
-                        offset.set(-curDir.y, curDir.x);
-                    }
-                    if (null !== offset.x && null !== offset.y) {
-                        vertexs.push({
-                            x: lastPoint.x,
-                            y: lastPoint.y,
-                            side: 1,
-                            offsetX: offset.x,
-                            offsetY: offset.y,
-                            time: lastTime,
-                        }, {
-                            x: lastPoint.x,
-                            y: lastPoint.y,
-                            side: -1,
-                            offsetX: -offset.x,
-                            offsetY: -offset.y,
-                            time: lastTime,
-                        })
-                        indices.push(
-                            cursor,
-                            cursor + 1,
-                            cursor + 2,
-                            cursor + 1,
-                            cursor + 3,
-                            cursor + 2,
-                        )
-                        cursor += 2;
-                    }
-                }
-                lastPoint.set(x, y);
-                lastDir.copy(curDir);
-                lastTime = time;
-            }
-            vertexs.push({
-                x: lastPoint.x,
-                y: lastPoint.y,
-                side: 1,
-                offsetX: -lastDir.y,
-                offsetY: lastDir.x,
-                time: lastTime,
-            }, {
-                x: lastPoint.x,
-                y: lastPoint.y,
-                side: -1,
-                offsetX: lastDir.y,
-                offsetY: -lastDir.x,
-                time: lastTime,
-            });
-            return {vertexs, indices}
         }
 
         function buildRasterPaths(setting, sampler, width, height) {
@@ -631,7 +569,7 @@ define([
             const _vec2 = new Vector2();
             points.push({x: startX, y: startY, t: time});
             for (let i = 0; i < setting.verticesPerLine; i++) {
-                if(i && !inRange(curPoint.x, curPoint.y)) break;
+                if (i && !inRange(curPoint.x, curPoint.y)) break;
                 const uv = _vec2.set(...sampler(curPoint.x, curPoint.y)).multiplyScalar(setting.velocityScale);
                 const speed = uv.length();
                 if (speed < setting.minSpeedThreshold) break;
@@ -698,9 +636,9 @@ define([
             }
         }
 
-        function createRangeCheck(limit){
-            const [xmin,xmax,ymin,ymax] = limit;
-            return (x,y)=>{
+        function createRangeCheck(limit) {
+            const [xmin, xmax, ymin, ymax] = limit;
+            return (x, y) => {
                 return x >= xmin && x <= xmax && y >= ymin && y <= ymax;
             }
         }

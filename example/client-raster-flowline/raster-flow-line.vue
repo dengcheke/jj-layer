@@ -7,7 +7,7 @@
 <script>
 import {loadModules} from "esri-loader";
 import axios from "axios";
-import {loadClientRasterFlowLineLayer} from "@layer";
+import {loadClientRasterFlowLineLayer} from "@src";
 import TimePlayer from '../common/time-player'
 import {GUI} from 'three/examples/jsm/libs/lil-gui.module.min'
 
@@ -27,7 +27,10 @@ export default {
     async mounted() {
         const container = this.$el;
         const {map, view} = await this.initMap(container);
-        const layer = this.layer = await this.loadCustomLy();
+        const layer = this.layer = await loadClientRasterFlowLineLayer({
+            id: this.layerId,
+            effect: "bloom(1.5, 1px, 0.0)",
+        });
         map.add(layer);
 
         const gui = new GUI();
@@ -64,15 +67,15 @@ export default {
             cols: 675,
             rows: 731,
             data: arr,
-            noDataValue:-9999
+            noDataValue: -9999
         }
 
         const handleDataChange = v => {
             if (v) {
                 layer.data = data1;
-                view.center = [120,20];
+                view.center = [120, 20];
                 view.scale = 3611100.909643
-                flowParams.velocityScale = layer.renderOpts.velocityScale =  1
+                flowParams.velocityScale = layer.renderOpts.velocityScale = 1
             } else {
                 layer.data = data2;
                 view.center = {
@@ -82,11 +85,11 @@ export default {
                     spatialReference: {wkid: 3857}
                 }
                 view.scale = 36111.909643
-                flowParams.velocityScale = layer.renderOpts.velocityScale =  100
+                flowParams.velocityScale = layer.renderOpts.velocityScale = 100
             }
         }
 
-        gui.add(switchData, 'changeData').onChange(v=>handleDataChange(v))
+        gui.add(switchData, 'changeData').onChange(v => handleDataChange(v))
         const bloomParams = {
             enableBloom: true,
             bloomStrength: 1.5,
@@ -112,11 +115,9 @@ export default {
             folder.add(bloomParams, 'bloomRadius', 0.0, 1.0).step(0.01).onChange(updateBloom);
 
             function updateBloom() {
-                layer.renderOpts.bloom = bloomParams.enableBloom ? {
-                    strength: bloomParams.bloomStrength,
-                    threshold: bloomParams.bloomThreshold,
-                    radius: bloomParams.bloomRadius,
-                } : null
+                layer.effect = bloomParams.enableBloom
+                    ? `bloom(${bloomParams.bloomStrength}, ${bloomParams.bloomRadius}px, ${bloomParams.bloomThreshold})`
+                    : null
             }
         }
         {
@@ -164,18 +165,12 @@ export default {
             const view = new MapView({
                 container: container,
                 map: map,
-                center:[120,20],
-                scale:3611100.909643,
+                center: [120, 20],
+                scale: 3611100.909643,
                 spatialReference: {wkid: 3857}
             });
-            window.__vv = view;
             return {map, view}
         },
-        async loadCustomLy() {
-            return loadClientRasterFlowLineLayer({
-                id: this.layerId,
-            })
-        }
     }
 }
 </script>
