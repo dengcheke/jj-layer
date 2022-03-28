@@ -16,7 +16,7 @@ import {
     WebGLRenderer,
 } from 'three'
 import {buildModule} from "@src/builder";
-import {RasterFlowLine2FragShader, RasterFlowLine2VertexShader} from "@src/layer/glsl/RasterFlowLine2.glsl";
+import {RasterFlowLineFragShader, RasterFlowLineVertexShader} from "@src/layer/glsl/RasterFlowLine.glsl";
 import {LineSegments2} from 'three/examples/jsm/lines/LineSegments2'
 import {LineSegmentsGeometry} from 'three/examples/jsm/lines/LineSegmentsGeometry'
 import {UnrealBloomPass} from "three/examples/jsm/postprocessing/UnrealBloomPass";
@@ -102,8 +102,8 @@ async function ClientRasterFlowLineLayerBuilder() {
                     u_lineWidth: {value: 4},
                 },
                 side: DoubleSide,
-                vertexShader: RasterFlowLine2VertexShader,
-                fragmentShader: RasterFlowLine2FragShader
+                vertexShader: RasterFlowLineVertexShader,
+                fragmentShader: RasterFlowLineFragShader
             });
             const mesh = this.lineMesh = new LineSegments2(new LineSegmentsGeometry(), material);
             this._handlers.push({

@@ -1,9 +1,13 @@
 export const RasterFlowLineVertexShader = `
 precision highp float;
-attribute vec2 a_position;
-attribute float a_side;
-attribute vec3 a_timeInfo;
-attribute vec2 a_extrude;
+
+attribute vec3 position;
+attribute vec2 uv;
+
+attribute vec4 instance_p0_p1;
+attribute vec4 instance_p2_p3;
+attribute vec4 instance_timeInfo;
+
 uniform mat3 u_transform;
 uniform mat3 u_rotation;
 uniform mat3 u_display;
@@ -14,16 +18,55 @@ varying float v_time;
 varying float v_totalTime;
 varying float v_timeSeed;
 
+bool samePoint(vec2 a, vec2 b){
+    return a.x == b.x && a.y == b.y;
+}
 void main(void) {
-    vec2 position = a_position;
-    float side = a_side;
-    vec3 offset = u_rotation * vec3(a_extrude * u_lineWidth * 0.5, 0.0);
-    vec2 xy = (u_display * ( u_transform * vec3(position, 1.0) + offset )).xy;
-    gl_Position = vec4(xy, 0.0, 1.0);
-    v_side = side;
-    v_time = a_timeInfo.x;
-    v_totalTime = a_timeInfo.y;
-    v_timeSeed = a_timeInfo.z;
+    vec2 p0 = instance_p0_p1.xy;
+    vec2 p1 = instance_p0_p1.zw;
+    vec2 p2 = instance_p2_p3.xy;
+    vec2 p3 = instance_p2_p3.zw;
+    
+    //to screen
+    p0 = (u_transform * vec3(p0, 1.0)).xy;
+    p1 = (u_transform * vec3(p1, 1.0)).xy;
+    p2 = (u_transform * vec3(p2, 1.0)).xy;
+    p3 = (u_transform * vec3(p3, 1.0)).xy;
+    
+    bool isStart = position.y < 0.5;
+    vec2 screenPos = isStart ? p0 : p1;
+    
+    vec2 dir = p2 - p1; //屏幕dir
+    dir = normalize(dir);
+    
+    //calc bevel offset
+    vec2 d01, d12;
+    if(isStart){
+        bool same01 = samePoint(p0, p1);
+        d01 = same01 ? dir : normalize(p1 - p0);
+        d12 = dir;
+    }else{
+        bool same23 = samePoint(p2, p3);
+        d01 = dir;
+        d12 = same23 ? dir : normalize(p3 - p2);
+    }
+    
+    vec2 vHalf = d01 + d12;
+    vHalf = normalize(vHalf);
+    
+    float scale = min(1.0 / abs(dot(vHalf, d12)), 10.0);
+    vec2 offset = vec2(vHalf.y, -vHalf.x) * scale;
+    offset *= position.x > 0.0 ? -1.0 : 1.0;
+    offset *= u_lineWidth * 0.5;
+    
+    screenPos += offset;
+    
+    gl_Position = vec4((u_display * vec3(screenPos,1.0)).xy, 0.0, 1.0);
+   
+    v_side = uv.x;
+    v_time = isStart ? instance_timeInfo.x : instance_timeInfo.y;
+    v_totalTime = instance_timeInfo.z;
+    v_timeSeed = instance_timeInfo.w;
 }`
 export const RasterFlowLineFragShader = `
 precision highp float;
