@@ -649,7 +649,8 @@ async function ClientRasterFlowLineLayerBuilder() {
                 }
             },
             data: {},
-            effect: {}
+            effect: {},
+            blendMode:{}
         },
         createLayerView: function (view) {
             if (view.type === "2d") {

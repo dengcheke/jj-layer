@@ -497,7 +497,9 @@ async function ClientVectorFieldLayerBuilder() {
                 set(v) {
                     Object.assign(this._vf, v || {});
                 }
-            }
+            },
+            blendMode:{},
+            effect:{}
         },
         createLayerView: function (view) {
             if (view.type !== "2d") throw new Error('不支持3d')

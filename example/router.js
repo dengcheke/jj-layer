@@ -5,6 +5,7 @@ import RasterFlowingLine from './client-raster-flowline/raster-flow-line';
 import AnimTime from './data-series/animation-time';
 import VectorField from './vector-field/vector-field'
 import MultiTimeHeatmap from './client-raster-colormap/client-raster-colormap'
+import blendMode from './blend-mode/blend-anim-flow-and-colormap'
 Vue.use(VueRouter);
 const routes = [
     {
@@ -31,6 +32,11 @@ const routes = [
         path:'/raster-colormap',
         name:'raster-colormap',
         component: MultiTimeHeatmap
+    },
+    {
+        path:'/blend-mode',
+        name:'blend-mode',
+        component: blendMode
     },
     { path: '*', redirect: '/flowing-line' }
 ];

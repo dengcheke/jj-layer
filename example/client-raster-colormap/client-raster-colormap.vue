@@ -33,7 +33,7 @@
 <script>
 import ElSlider from 'element-ui/lib/slider';
 import {loadModules} from "esri-loader";
-import {loadClientRasterColormapLayer} from "@layer";
+import {loadClientRasterColormapLayer} from "@src";
 import cloneDeep from "lodash/cloneDeep";
 import axios from "axios";
 import {genColorRamp} from "@src/utils";

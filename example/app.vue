@@ -18,6 +18,7 @@ export default {
                 {name: 'data series + 3d tip', pathName: 'data-series'},
                 {name: 'vector field', pathName: 'vector-field'},
                 {name: 'raster colormap', pathName: 'raster-colormap'},
+                {name: 'anim-flow + colormap\r\n(group bloom effect need api >= 4.17)', pathName: 'blend-mode'},
             ]
         }
     },
@@ -57,7 +58,12 @@ html, body, div {
         .nav-item{
             background-color: deepskyblue;
             padding: 6px 12px;
+            white-space: pre-wrap;
+            max-width: 200px;
         }
     }
+}
+.esri-ui{
+    display: none !important;
 }
 </style>

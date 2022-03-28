@@ -15,9 +15,9 @@ export const COD_META = deepFreeze({
     extent: {
         type: 'extent',
         xmin: 394725.406431600,
-        xmax: 394725.406431600 + 10 * (675 - 1),
+        xmax: 394725.406431600 + 10 * 675,
         ymin: 3280334.24197700,
-        ymax: 3280334.24197700 + 10 * (731 - 1),
+        ymax: 3280334.24197700 + 10 * 731,
         spatialReference: {wkid: 2436}
     },
     cols: 675,
