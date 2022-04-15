@@ -98,17 +98,20 @@ export default {
                 flowLayer.effect = null;
                 flowLayer.blendMode = "destination-in";
                 group.add(flowLayer);
+                updateBloom();
             } else if (v === 'flowOnly') {
                 colormapLayer.visible = false;
                 flowLayer.visible = true;
                 flowLayer.effect = "bloom(1, 0.5px, 0.0)";
                 flowLayer.blendMode = "normal";
                 map.add(flowLayer);
+                updateBloom();
             } else {
                 colormapLayer.visible = true;
                 flowLayer.visible = false;
                 flowLayer.effect = null;
                 flowLayer.blendMode = "normal";
+                group.effect = null;
             }
         });
         const bloomParams = {
