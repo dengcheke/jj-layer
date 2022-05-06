@@ -31,6 +31,7 @@ import {
 } from "three";
 import {DataSeriesGraphicFragShader, DataSeriesGraphicVertexShader} from "@src/layer/glsl/DataSeries.glsl";
 import {buildModule} from "@src/builder";
+import {DataSeriesTINFragShader, DataSeriesTINVertexShader} from "@src/layer/glsl/DataSeriesTIN.glsl";
 
 const _mat3 = new Matrix3()
 const DEFAULT_COLOR_STOPS = [
@@ -42,12 +43,12 @@ const Flags = Object.freeze({
     appear: 'appear'
 })
 
-async function DataSeriesGraphicsLayerBuilder() {
-    let [watchUtils, Accessor, GraphicsLayer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
+async function DataSeriesTINLayerBuilder() {
+    let [watchUtils, Accessor, Layer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
         = await esriLoader.loadModules([
         "esri/core/watchUtils",
         "esri/core/Accessor",
-        "esri/layers/GraphicsLayer",
+        "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/geometry/geometryEngineAsync",
         "esri/geometry/Extent",
@@ -59,7 +60,6 @@ async function DataSeriesGraphicsLayerBuilder() {
         constructor: function () {
             this._handlers = [];
             this.dataset = null;
-
 
             this.updateFlags = new Set();
 
@@ -94,8 +94,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                     u_rotation: {value: new Matrix3()},
                     u_display: {value: new Matrix3()},
                     u_center: {value: new Vector4()},
-                    u_offsetScale: {value: new Vector2()},
-                    u_percent: {value: performance.now()},
+                    u_percent: {value: 0},
                     u_texSize: {value: new Vector2()},
                     u_valueRange: {value: new Vector2()},
                     u_isPick: {value: false},
@@ -104,8 +103,8 @@ async function DataSeriesGraphicsLayerBuilder() {
                     u_afterTex: {value: new DataTexture()},
                 },
                 side: DoubleSide,
-                vertexShader: DataSeriesGraphicVertexShader,
-                fragmentShader: DataSeriesGraphicFragShader
+                vertexShader: DataSeriesTINVertexShader,
+                fragmentShader: DataSeriesTINFragShader
             });
             this.meshObj = new Mesh(new BufferGeometry(), material);
             const pickRT = new WebGLRenderTarget(1, 1);
@@ -113,7 +112,6 @@ async function DataSeriesGraphicsLayerBuilder() {
             this.pickObj = {pickRT, pixelBuffer}
             this._handlers.push({
                 remove: () => {
-                    visibleWatcher?.remove();
                     this.meshObj.geometry.dispose();
                     material.uniforms.u_colorRamp.value?.dispose();
                     material.uniforms.u_beforeTex.value.dispose();
@@ -124,81 +122,6 @@ async function DataSeriesGraphicsLayerBuilder() {
 
             const layer = this.layer;
             const renderOpts = layer.renderOpts;
-            let visibleWatcher = null;
-            const handleGraphicChanged = async () => {
-                if(this.destroyed) return;
-                {
-                    this.layer.fullExtent = null;
-                    visibleWatcher?.remove();
-                    visibleWatcher = null;
-                    this.meshes = null;
-                }
-                const __version = ++this.version;
-                const viewSR = this.view.spatialReference;
-                let fullExtent = null;
-                const graphics = this.layer.graphics;
-                const indexKey = renderOpts.indexKey;
-                const task = graphics.map(async (g, idx) => {
-                    const index = indexKey ? g.attributes?.[indexKey] : idx;
-                    if(g.geometry.cache.mesh){
-                        g._valIndex = index;
-                        return {
-                            mesh: g.geometry.cache.mesh,
-                            graphic: g,
-                            index: index,
-                            pickIdx: idx + 1,//0表示没有选中
-                        }
-                    }else{
-                        let geo = await geometryEngineAsync.simplify(g.geometry);
-                        if (!viewSR.equals(geo.spatialReference)) {
-                            await projection.load();
-                            geo = projection.project(geo, viewSR);
-                        }
-                        let extent;
-                        if (geo.type === 'point') {
-                            extent = new Extent({
-                                spatialReference: viewSR,
-                                xmin: geo.x,
-                                ymin: geo.y,
-                                xmax: geo.x,
-                                ymax: geo.y
-                            })
-                        } else {
-                            extent = geo.extent;
-                        }
-                        if (!fullExtent) {
-                            fullExtent = extent.clone();
-                        } else {
-                            fullExtent.union(extent);
-                        }
-                        const mesh = await this.processGraphic(geo, g.attributes || {});
-                        g.geometry.cache.mesh = mesh;
-                        g._valIndex = index;
-                        return {
-                            mesh: mesh,
-                            graphic: g,
-                            index: index,
-                            pickIdx: idx + 1,
-                        }
-                    }
-                })
-                const meshes = await Promise.all(task._items);
-
-                if(this.destroyed) return;
-                if (__version !== this.version) return;
-                this.meshes = meshes;
-                meshes.version = __version;
-                meshes.vertexCount = this.meshes.reduce(function (vertexCount, item) {
-                    return vertexCount + item.mesh.vertices.length;
-                }, 0);
-                meshes.indexCount = this.meshes.reduce(function (indexCount, item) {
-                    return indexCount + item.mesh.indices.length;
-                }, 0);
-                this.layer.fullExtent = fullExtent;
-                visibleWatcher = createVisibleWatcher(graphics);
-                this.updateFlags.add(Flags.data);
-                this.requestRender();
-            };
             const dataHandle = () => {
                 if(this.destroyed) return;
                 const data = layer.data;
@@ -213,11 +136,11 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const unpackAlign = texSize[0] % 8 === 0
                     ? 8
                     : (texSize[0] % 4 === 0
-                        ? 4
-                        : (texSize[0] % 2 === 0
-                            ? 2
-                            : 1
-                        )
+                            ? 4
+                            : (texSize[0] % 2 === 0
+                                    ? 2
+                                    : 1
+                            )
                     );
                 this.dataset = {
                     times: times,
@@ -240,7 +163,6 @@ async function DataSeriesGraphicsLayerBuilder() {
                     return arr;
                 }
             }
-            this._handlers.push(watchUtils.on(this, "layer.graphics", "change", handleGraphicChanged, handleGraphicChanged));
             this._handlers.push(layer.watch('curTime', () => {
                 this.needUpdateTimeTex = true;
                 this.requestRender();
@@ -269,18 +191,6 @@ async function DataSeriesGraphicsLayerBuilder() {
 
             layer.data && dataHandle();
             renderOpts.colorStops && colorStopsHandle();
-
-            function createVisibleWatcher(graphics) {
-                const offs = graphics.map(g => g.watch('visible', () => {
-                    self.updateFlags.add(Flags.appear);
-                    self.requestRender();
-                }))
-                return {
-                    remove: () => {
-                        offs.forEach(h => h.remove())
-                    }
-                }
-            }
         },
 
         detach: function () {
@@ -355,7 +265,6 @@ async function DataSeriesGraphicsLayerBuilder() {
             const [hy, ly] = doubleToTwoFloats(state.center[1]);
 
             uniform.u_center.value.set(hx, hy, lx, ly);
-            uniform.u_offsetScale.value.set(1, 1);
             uniform.u_isPick.value = false;
             uniform.u_percent.value = this.percent;
             const renderOpts = layer.renderOpts;
@@ -547,39 +456,9 @@ async function DataSeriesGraphicsLayerBuilder() {
             dataChange && geometry.setIndex(indexData);
             this.updateFlags.clear();
         },
-        processGraphic: function (geo, attr) {
-            let size, x, y;
-            switch (geo.type) {
-                case "extent":
-                    return this.tessellateExtent(geo);
-                case "point":
-                    size = attr.size || 6;
-                    x = attr.x || -(size / 2);
-                    y = attr.y || -(size / 2);
-                    return this.tessellatePoint(geo, {
-                        x: x,
-                        y: y,
-                        width: size,
-                        height: size
-                    })
-                case "multipoint":
-                    size = attr.size || 6;
-                    x = attr.x || -(size / 2);
-                    y = attr.y || -(size / 2);
-                    return this.tessellateMultipoint(geo, {
-                        x: x,
-                        y: y,
-                        width: size,
-                        height: size
-                    })
-                case "polyline":
-                    return this.tessellatePolyline(geo, attr.width || 6);
-                case "polygon":
-                    return this.tessellatePolygon(geo)
-            }
-        },
 
         hitTest: function (...args) {
+            return null
             let point;
             if(ARCGIS_VERSION <= 4.21){
                 // (x, y)
@@ -652,22 +531,19 @@ async function DataSeriesGraphicsLayerBuilder() {
             const [hy, ly] = doubleToTwoFloats(point.y);
             uniform.u_center.value.set(hx, hy, lx, ly);
             uniform.u_isPick.value = true;
-            uniform.u_offsetScale.value.set(state.size[0], state.size[1]);
         },
     });
     const Opts = Accessor.createSubclass({
         constructor: function () {
             this.valueRange = null;
             this.colorStops = DEFAULT_COLOR_STOPS;
-            this.indexKey = null;
         },
         properties: {
             valueRange: {},
             colorStops: {},
-            indexKey:{}
         },
     });
-    return GraphicsLayer.createSubclass({
+    return Layer.createSubclass({
         constructor: function () {
             this.curTime = null;
             this.data = null;
@@ -715,7 +591,7 @@ async function DataSeriesGraphicsLayerBuilder() {
     });
 }
 
-export async function loadDataSeriesGraphicsLayer(opts) {
+export async function loadDataSeriesTINLayer(opts) {
     const ctor = await buildModule(DataSeriesGraphicsLayerBuilder)
     return new ctor(opts);
 }
