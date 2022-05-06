@@ -37,7 +37,7 @@
 
 <script>
 import {loadModules} from "esri-loader";
-import {loadDataSeriesGraphicsLayer, loadTip3DLayer} from '@layer';
+import {loadDataSeriesGraphicsLayer, loadTip3DLayer} from '@src';
 import debounce from "lodash/debounce";
 import throttle from "lodash/throttle";
 import {hlMap} from "../graphic-symbol";

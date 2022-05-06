@@ -137,13 +137,15 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const viewSR = this.view.spatialReference;
                 let fullExtent = null;
                 const graphics = this.layer.graphics;
+                const indexKey = renderOpts.indexKey;
                 const task = graphics.map(async (g, idx) => {
+                    const index = indexKey ? g.attributes?.[indexKey] : idx;
                     if(g.geometry.cache.mesh){
                         g._valIndex = idx;
                         return {
                             mesh: g.geometry.cache.mesh,
                             graphic: g,
-                            index: idx,
+                            index: index,
                             pickIdx: idx + 1,//0表示没有选中
                         }
                     }else{
@@ -175,7 +177,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                         return {
                             mesh: mesh,
                             graphic: g,
-                            index: idx,
+                            index: index,
                             pickIdx: idx + 1,
                         }
                     }
@@ -208,7 +210,15 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const pixels = data.map(item => {
                     return alignData(item[1], totalLen);
                 });
-                const unpackAlign = texSize[0] % 8 === 0 ? 8 : (texSize[0] % 4 === 0 ? 4 : (texSize[0] % 2 === 0 ? 2 : 1));
+                const unpackAlign = texSize[0] % 8 === 0
+                    ? 8
+                    : (texSize[0] % 4 === 0
+                        ? 4
+                        : (texSize[0] % 2 === 0
+                            ? 2
+                            : 1
+                        )
+                    );
                 this.dataset = {
                     times: times,
                     pixels: pixels,
@@ -459,7 +469,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                     ['a_position', Float32BufferAttribute, Float32Array, 4, false],
                     ['a_offset', Float32BufferAttribute, Float32Array, 2, false],
                     ['a_upright', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
-                    ['a_dataIndex', Float32BufferAttribute, Float32Array, 1, false],
+                    ['a_dataIndex', Float32BufferAttribute, Uint32Array, 1, false],
                     ['a_pickColor', Uint8ClampedBufferAttribute, Uint8ClampedArray, 4, true],
                     ['a_visible', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
                 ].map(([name, ctor, typeArr, itemSize, normalized]) => {
@@ -644,15 +654,21 @@ async function DataSeriesGraphicsLayerBuilder() {
             uniform.u_isPick.value = true;
             uniform.u_offsetScale.value.set(state.size[0], state.size[1]);
         },
+
+        fromTINMesh({position, index}){
+
+        }
     });
     const Opts = Accessor.createSubclass({
         constructor: function () {
             this.valueRange = null;
             this.colorStops = DEFAULT_COLOR_STOPS;
+            this.indexKey = null;
         },
         properties: {
             valueRange: {},
             colorStops: {},
+            indexKey:{}
         },
     });
     return GraphicsLayer.createSubclass({
