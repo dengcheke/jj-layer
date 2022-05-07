@@ -1,12 +1,5 @@
 import * as esriLoader from "esri-loader"
-import {
-    doubleToTwoFloats,
-    genColorRamp,
-    getRenderTarget,
-    id2RGBA,
-    near2PowMax,
-    RGBA2Id
-} from "@src/utils";
+import {doubleToTwoFloats, genColorRamp, getRenderTarget, near2PowMax, RGBA2Id} from "@src/utils";
 import {
     AlphaFormat,
     BufferGeometry,
@@ -23,13 +16,12 @@ import {
     RawShaderMaterial,
     SrcAlphaFactor,
     TextureLoader,
-    Uint8ClampedBufferAttribute,
+    Uint32BufferAttribute,
     Vector2,
     Vector4,
     WebGLRenderer,
     WebGLRenderTarget
 } from "three";
-import {DataSeriesGraphicFragShader, DataSeriesGraphicVertexShader} from "@src/layer/glsl/DataSeries.glsl";
 import {buildModule} from "@src/builder";
 import {DataSeriesTINFragShader, DataSeriesTINVertexShader} from "@src/layer/glsl/DataSeriesTIN.glsl";
 
@@ -38,10 +30,6 @@ const DEFAULT_COLOR_STOPS = [
     {value: 0, color: 'yellow'},
     {value: 1, color: 'red'}
 ]
-const Flags = Object.freeze({
-    data: 'data',
-    appear: 'appear'
-})
 
 async function DataSeriesTINLayerBuilder() {
     let [watchUtils, Accessor, Layer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
@@ -60,8 +48,8 @@ async function DataSeriesTINLayerBuilder() {
         constructor: function () {
             this._handlers = [];
             this.dataset = null;
-
-            this.updateFlags = new Set();
+            this.bufferReady = false;
+            this.fullExtent = null;
 
             this.texSize = null;
             this.beforeTime = null;
@@ -75,7 +63,6 @@ async function DataSeriesTINLayerBuilder() {
         },
 
         attach: function () {
-            const self = this;
             this.renderer = new WebGLRenderer({
                 canvas: this.context.canvas,
                 gl: this.context,
@@ -93,7 +80,7 @@ async function DataSeriesTINLayerBuilder() {
                     u_transform: {value: new Matrix3()},
                     u_rotation: {value: new Matrix3()},
                     u_display: {value: new Matrix3()},
-                    u_center: {value: new Vector4()},
+                    u_extent: {value: new Vector4()},
                     u_percent: {value: 0},
                     u_texSize: {value: new Vector2()},
                     u_valueRange: {value: new Vector2()},
@@ -122,8 +109,31 @@ async function DataSeriesTINLayerBuilder() {
 
             const layer = this.layer;
             const renderOpts = layer.renderOpts;
+            this._handlers.push(layer.watch('tinMesh', () => {
+                this.setTINMesh(this.layer.tinMesh);
+            }));
+            const extentHandle = async () => {
+                const viewSR = this.view.spatialReference;
+                const ext = layer?.fullExtent;
+                if (!viewSR || !ext) {
+                    this.fullExtent = null;
+                    return;
+                }
+                if (!viewSR.equals(ext)) {
+                    await projection.load();
+                    this.fullExtent = projection.project(ext, viewSR);
+                }
+                material.uniforms.u_extent.value.set(
+                    ext.xmin,
+                    ext.ymin,
+                    ext.xmax - ext.xmin,
+                    ext.ymax - ext.ymin
+                )
+                this.requestRender();
+            }
+            this._handlers.push(layer.watch('fullExtent', extentHandle));
             const dataHandle = () => {
-                if(this.destroyed) return;
+                if (this.destroyed) return;
                 const data = layer.data;
                 data.sort((a, b) => +a[0] - +b[0]);
                 const times = data.map(item => +item[0]);
@@ -189,6 +199,8 @@ async function DataSeriesTINLayerBuilder() {
             }
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
 
+            layer.fullExtent && extentHandle();
+            layer.tinMesh && this.setTINMesh(layer.tinMesh)
             layer.data && dataHandle();
             renderOpts.colorStops && colorStopsHandle();
         },
@@ -200,27 +212,23 @@ async function DataSeriesTINLayerBuilder() {
         },
 
         render: function (renderParameters) {
-            if(this.destroyed) return;
+            if (this.destroyed) return;
             const state = renderParameters.state;
             if (!this.layer.visible
                 || !this.layer.renderOpts.valueRange
-                || !this.dataset
-                || !this.layer.graphics.length
                 || !this.layer.fullExtent
-                || !state.extent.intersects(this.layer.fullExtent)
+                || !this.fullExtent
+                //|| !state.extent.intersects(this.layer.fullExtent)
             ) return;
             if (!this.meshObj?.material.uniforms.u_colorRamp.value?.isReady) return;
-
-            const hasShow = this.layer.graphics.find(g => g.visible);
-            if (!hasShow) return;
-
-            this.updateBufferData();
+            if (!this.bufferReady) return;
+            //if (!this.layer.fullExtent) return;
             this.checkTimeTexNeedUpdate();
             this.updateRenderParams(state);
 
             const gl = this.context;
             const {renderer, meshObj, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,ARCGIS_VERSION);
+            const {framebuffer, viewport} = getRenderTarget.call(this, ARCGIS_VERSION);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -228,43 +236,55 @@ async function DataSeriesTINLayerBuilder() {
         },
 
         updateRenderParams: function (state) {
-            const {meshObj, layer} = this;
+            const {meshObj, layer, fullExtent, view} = this;
             meshObj.material.blending = CustomBlending;
             const uniform = meshObj.material.uniforms;
             const rotate = -(Math.PI * state.rotation) / 180;
-            {
-                uniform.u_rotation.value.identity().rotate(rotate);
-                uniform.u_transform.value.identity()
-                    .premultiply(
-                        _mat3.identity().scale(
-                            1 / state.resolution,
-                            -1 / state.resolution
-                        )
-                    )
-                    .premultiply(
-                        uniform.u_rotation.value
-                    )
-                    .premultiply(
-                        _mat3.identity().translate(
-                            state.size[0] / 2,
-                            state.size[1] / 2
-                        )
-                    );
-                uniform.u_display.value.identity()
-                    .premultiply(
-                        _mat3.identity().scale(
-                            2 / state.size[0],
-                            -2 / state.size[1]
-                        )
-                    )
-                    .premultiply(
-                        _mat3.identity().translate(-1, 1)
-                    )
-            }
-            const [hx, lx] = doubleToTwoFloats(state.center[0]);
-            const [hy, ly] = doubleToTwoFloats(state.center[1]);
+            //extent左下角在屏幕上的坐标
+            const point = view.toScreen({
+                x: fullExtent.xmin,
+                y: fullExtent.ymin,
+                spatialReference: fullExtent.spatialReference
+            });
+            //extent对应的像素宽高
+            const extentPixels = [
+                fullExtent.width / state.resolution,
+                fullExtent.height / state.resolution
+            ]
 
-            uniform.u_center.value.set(hx, hy, lx, ly);
+            uniform.u_rotation.value.identity().rotate(rotate);
+            //1.点转为相对于extent归一化坐标(in shader)
+            uniform.u_transform.value.identity()
+                // 2.转为相对于extent的坐标(y轴向上),(屏幕像素单位y轴向下),
+                // extentPixels 是在非旋转情况下计算的,
+                // resolution不受旋转影响,需要先转为像素坐标
+                .premultiply(
+                    _mat3.identity().scale(
+                        extentPixels[0],
+                        -extentPixels[1]
+                    )
+                )
+                //3.应用旋转
+                .premultiply(
+                    uniform.u_rotation.value
+                )
+                //4.添加偏移,转为屏幕像素坐标
+                .premultiply(
+                    _mat3.identity().translate(point.x, point.y)
+                )
+            //屏幕转ndc
+            uniform.u_display.value.identity()
+                .premultiply(
+                    _mat3.identity().scale(
+                        2 / state.size[0],
+                        -2 / state.size[1]
+                    )
+                )
+                .premultiply(
+                    _mat3.identity().translate(-1, 1)
+                )
+
+
             uniform.u_isPick.value = false;
             uniform.u_percent.value = this.percent;
             const renderOpts = layer.renderOpts;
@@ -274,6 +294,7 @@ async function DataSeriesTINLayerBuilder() {
             );
             const {flipY, texSize} = this.dataset;
             uniform.u_texSize.value.set(texSize[0], texSize[1]);
+
             if (this.needUpdateTimeTex) {
                 const {beforeTime, afterTime} = this;
                 let beforeTex = uniform.u_beforeTex.value;
@@ -362,109 +383,37 @@ async function DataSeriesTINLayerBuilder() {
                 return [2 ** cols, 2 ** rows];
             }
         },
-        updateBufferData: function () {
-            if (this.destroyed || !this.updateFlags.size) return;
-            if (this.meshes?.version !== this.version) return;
-            const {meshObj, meshes} = this;
-            const {vertexCount, indexCount} = meshes;
 
-            const dataChange = this.updateFlags.has(Flags.data),
-                appearChange = dataChange || this.updateFlags.has(Flags.appear);
+        setTINMesh({vertex, index}) {
+            const {meshObj} = this;
+            meshObj.geometry.dispose();
+            const geometry = meshObj.geometry = new BufferGeometry();
 
-            if (dataChange) {
-                meshObj.geometry.dispose();
-                const geometry = meshObj.geometry = new BufferGeometry();
-                [
-                    ['a_position', Float32BufferAttribute, Float32Array, 4, false],
-                    ['a_offset', Float32BufferAttribute, Float32Array, 2, false],
-                    ['a_upright', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
-                    ['a_dataIndex', Float32BufferAttribute, Uint32Array, 1, false],
-                    ['a_pickColor', Uint8ClampedBufferAttribute, Uint8ClampedArray, 4, true],
-                    ['a_visible', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
-                ].map(([name, ctor, typeArr, itemSize, normalized]) => {
-                    geometry.setAttribute(
-                        name,
-                        new ctor(new typeArr(itemSize * vertexCount), itemSize, normalized)
-                    );
-                })
-            }
+            const indexCount = index.length;
+            const tinCount = indexCount / 3;
+            if ((tinCount >> 0) !== tinCount) throw new Error('tin 索引数目不对,无法被3整除');
+            geometry.setAttribute('a_position', new Float32BufferAttribute(
+                new Float32Array(vertex), 2, false));
+            /*geometry.setAttribute('a_pickColor', new Uint8ClampedBufferAttribute(
+                new Uint8ClampedArray(4 * indexCount)
+            ), 4, true);
+            geometry.setAttribute('a_dataIndex', new Float32BufferAttribute(
+                new Float32Array(indexCount)
+            ), 1, false);*/
 
-            const geometry = meshObj.geometry;
-            const posBuf = geometry.getAttribute('a_position').array;
-            const offsetBuf = geometry.getAttribute('a_offset').array;
-            const uprightBuf = geometry.getAttribute('a_upright').array;
-            const indexBuf = geometry.getAttribute('a_dataIndex').array;
-            const visibleBuf = geometry.getAttribute('a_visible').array;
-            const pickColorBuf = geometry.getAttribute('a_pickColor').array;
-
-            const indexData = new Array(indexCount);
-
-            let currentVertex = 0;
-            let currentIndex = 0;
-
-            for (let meshIndex = 0; meshIndex < this.meshes.length; ++meshIndex) {
-                const item = this.meshes[meshIndex];
-                const {mesh, graphic, index} = item;
-
-                const pickColor = id2RGBA(item.pickIdx);
-                const visible = graphic.visible ? 1 : 0;
-                const upright = graphic.attributes?.upright ? 1 : 0;
-                for (let i = 0; i < mesh.indices.length; ++i) {
-                    let idx = mesh.indices[i];
-                    indexData[currentIndex] = currentVertex + idx;
-                    currentIndex++;
-                }
-
-                for (let i = 0; i < mesh.vertices.length; ++i) {
-                    if (dataChange) {
-                        const v = mesh.vertices[i], {x, y} = v;
-                        const [hx, lx] = doubleToTwoFloats(x);
-                        const [hy, ly] = doubleToTwoFloats(y);
-                        posBuf[currentVertex * 4] = hx;
-                        posBuf[currentVertex * 4 + 1] = hy;
-                        posBuf[currentVertex * 4 + 2] = lx;
-                        posBuf[currentVertex * 4 + 3] = ly;
-
-                        offsetBuf[currentVertex * 2] = v.xOffset;
-                        offsetBuf[currentVertex * 2 + 1] = v.yOffset;
-
-                        uprightBuf[currentVertex] = upright;
-
-                        indexBuf[currentVertex] = index;
-
-                        pickColorBuf[currentVertex * 4] = pickColor[0];
-                        pickColorBuf[currentVertex * 4 + 1] = pickColor[1];
-                        pickColorBuf[currentVertex * 4 + 2] = pickColor[2];
-                        pickColorBuf[currentVertex * 4 + 3] = pickColor[3];
-
-                    }
-                    if (appearChange) {
-                        visibleBuf[currentVertex] = visible;
-                    }
-
-                    currentVertex++;
-                }
-            }
-            if (dataChange) {
-                for (let attr in geometry.attributes) {
-                    geometry.getAttribute(attr).needsUpdate = true;
-                }
-            }
-            if (appearChange) {
-                geometry.getAttribute('a_visible').needsUpdate = true;
-            }
-            dataChange && geometry.setIndex(indexData);
-            this.updateFlags.clear();
+            geometry.setIndex(new Uint32BufferAttribute(index, 1));
+            this.bufferReady = true;
+            this.requestRender();
         },
 
         hitTest: function (...args) {
             return null
             let point;
-            if(ARCGIS_VERSION <= 4.21){
+            if (ARCGIS_VERSION <= 4.21) {
                 // (x, y)
                 const x = args[0], y = args[1];
                 point = this.view.toMap({x: x, y: y});
-            }else{
+            } else {
                 // (_mapPoint, screenPoint)
                 point = args[0];
             }
@@ -547,6 +496,7 @@ async function DataSeriesTINLayerBuilder() {
         constructor: function () {
             this.curTime = null;
             this.data = null;
+            this.tinMesh = null;
             Object.defineProperties(this, {
                 _renderOpts: {
                     enumerable: false,
@@ -559,6 +509,8 @@ async function DataSeriesTINLayerBuilder() {
         properties: {
             curTime: {},
             data: {},
+            tinMesh: {},
+            fullExtent: {},
             renderOpts: {
                 get() {
                     return this._renderOpts
@@ -568,6 +520,7 @@ async function DataSeriesTINLayerBuilder() {
                 }
             }
         },
+
         getDataByIndex(valIndex) {
             const sData = this.data;
             if (!sData) return null;
@@ -580,7 +533,6 @@ async function DataSeriesTINLayerBuilder() {
             }
             return data;
         },
-
         createLayerView: function (view) {
             if (view.type !== "2d") throw new Error('不支持3d')
             return new CustomLayerView2D({
@@ -592,6 +544,6 @@ async function DataSeriesTINLayerBuilder() {
 }
 
 export async function loadDataSeriesTINLayer(opts) {
-    const ctor = await buildModule(DataSeriesGraphicsLayerBuilder)
+    const ctor = await buildModule(DataSeriesTINLayerBuilder)
     return new ctor(opts);
 }

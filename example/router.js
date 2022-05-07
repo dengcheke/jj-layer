@@ -3,6 +3,7 @@ import VueRouter from 'vue-router';
 import FlowingLine from './flow-line/flow-line';
 import RasterFlowingLine from './client-raster-flowline/raster-flow-line';
 import AnimTime from './data-series/animation-time';
+import SeriesTIN from './data-series-tin/series-tin';
 import VectorField from './vector-field/vector-field'
 import MultiTimeHeatmap from './client-raster-colormap/client-raster-colormap'
 import blendMode from './blend-mode/blend-anim-flow-and-colormap'
@@ -37,6 +38,11 @@ const routes = [
         path:'/blend-mode',
         name:'blend-mode',
         component: blendMode
+    },
+    {
+        path:'/data-series-tin',
+        name:'data-series-tin',
+        component: SeriesTIN
     },
     { path: '*', redirect: '/flowing-line' }
 ];

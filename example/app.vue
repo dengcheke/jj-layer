@@ -19,6 +19,7 @@ export default {
                 {name: 'vector field', pathName: 'vector-field'},
                 {name: 'raster colormap', pathName: 'raster-colormap'},
                 {name: 'anim-flow + colormap\r\n(group bloom effect need api >= 4.17)', pathName: 'blend-mode'},
+                {name: 'series-tin', pathName: 'data-series-tin'},
             ]
         }
     },

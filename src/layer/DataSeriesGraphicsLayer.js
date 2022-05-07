@@ -469,7 +469,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                     ['a_position', Float32BufferAttribute, Float32Array, 4, false],
                     ['a_offset', Float32BufferAttribute, Float32Array, 2, false],
                     ['a_upright', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
-                    ['a_dataIndex', Float32BufferAttribute, Uint32Array, 1, false],
+                    ['a_dataIndex', Float32BufferAttribute, Float32Array, 1, false],
                     ['a_pickColor', Uint8ClampedBufferAttribute, Uint8ClampedArray, 4, true],
                     ['a_visible', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
                 ].map(([name, ctor, typeArr, itemSize, normalized]) => {
