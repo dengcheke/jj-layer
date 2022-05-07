@@ -42,6 +42,8 @@ import colorStops from './color-step.png'
 import {SECTION_DATA_INFO} from "./config";
 import TimePlayer from '../common/time-player'
 import {loadDataSeriesTINLayer} from "@src/layer/DataSeriesTINMeshLayer";
+import axios from "axios";
+import throttle from "lodash/throttle";
 
 export default {
     name: "series-tin-layer",
@@ -152,27 +154,29 @@ export default {
                             type: 'point',
                             x: i[0],
                             y: i[1],
-                            spatialReference:{wkid:4326}
+                            spatialReference: {wkid: 4326}
                         }
                     }
                 })
             });
-            window.__view = view;
+            view.on('pointer-move', async (evt) => {
+                const hitRes = await view.hitTest(evt);
+                const f = hitRes.results.find(f => {
+                    return (f.graphic.sourceLayer || f.graphic.layer || {}).id === this.layerId
+                });
+                if (f) {
+                    view.graphics.removeAll();
+                    view.graphics.add(f.graphic)
+                }
+            })
             return {map, view}
         },
         async loadCustomLy() {
-            /* const vertexData = new Float32Array(
-                 (await axios.get('/tin/node.bin', {
-                     responseType: "arraybuffer"
-                 })).data
-             );*/
+            const originBuffer = (await axios.get('/tin/tin.bin', {
+                responseType: "arraybuffer"
+            })).data;
+            const vertexData = new Float32Array(originBuffer);
 
-            const vertexData = new Float32Array([
-                0, 0,
-                1, 0,
-                1, 1,
-                0, 0.5
-            ].map((i, idx) => idx % 2 === 0 ? i + 119.5 : i + 25))
             const pointCount = vertexData.length / 2;
             let xmin = Infinity, xmax = -Infinity;
             let ymin = Infinity, ymax = -Infinity;
@@ -183,15 +187,6 @@ export default {
                 ymax = Math.max(vertexData[i * 2 + 1], ymax);
             }
             console.log(xmin, xmax, ymin, ymax)
-
-            /*const indexData = new Uint32Array(
-                (await axios.get('/tin/mesh.bin', {
-                    responseType: "arraybuffer"
-                })).data
-            )*/
-            const indexData = new Uint32Array([
-                0, 1, 3, 1, 2, 3
-            ])
 
             return await loadDataSeriesTINLayer({
                 id: this.layerId,
@@ -204,7 +199,6 @@ export default {
                 },
                 tinMesh: {
                     vertex: vertexData,
-                    index: indexData
                 },
                 data: [
                     [0, [0, 4]],

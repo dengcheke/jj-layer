@@ -1,13 +1,16 @@
 import * as esriLoader from "esri-loader"
-import {doubleToTwoFloats, genColorRamp, getRenderTarget, near2PowMax, RGBA2Id} from "@src/utils";
+import {genColorRamp, getRenderTarget, id2RGBA, near2PowMax, RGBA2Id} from "@src/utils";
 import {
     AlphaFormat,
-    BufferGeometry,
     CustomBlending,
     DataTexture,
     DoubleSide,
     Float32BufferAttribute,
     FloatType,
+    InstancedBufferAttribute,
+    InstancedBufferGeometry,
+    InstancedInterleavedBuffer,
+    InterleavedBufferAttribute,
     Matrix3,
     Mesh,
     NoBlending,
@@ -16,7 +19,6 @@ import {
     RawShaderMaterial,
     SrcAlphaFactor,
     TextureLoader,
-    Uint32BufferAttribute,
     Vector2,
     Vector4,
     WebGLRenderer,
@@ -32,10 +34,10 @@ const DEFAULT_COLOR_STOPS = [
 ]
 
 async function DataSeriesTINLayerBuilder() {
-    let [watchUtils, Accessor, Layer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
+    let [Accessor, Graphic, Layer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
         = await esriLoader.loadModules([
-        "esri/core/watchUtils",
         "esri/core/Accessor",
+        "esri/Graphic",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/geometry/geometryEngineAsync",
@@ -78,7 +80,6 @@ async function DataSeriesTINLayerBuilder() {
                 blendDst: OneMinusSrcAlphaFactor,
                 uniforms: {
                     u_transform: {value: new Matrix3()},
-                    u_rotation: {value: new Matrix3()},
                     u_display: {value: new Matrix3()},
                     u_extent: {value: new Vector4()},
                     u_percent: {value: 0},
@@ -93,7 +94,17 @@ async function DataSeriesTINLayerBuilder() {
                 vertexShader: DataSeriesTINVertexShader,
                 fragmentShader: DataSeriesTINFragShader
             });
-            this.meshObj = new Mesh(new BufferGeometry(), material);
+            const geo = new InstancedBufferGeometry();
+            {
+                geo.setAttribute('position', new Float32BufferAttribute([
+                    1, 0, 0,
+                    0, 1, 0,
+                    0, 0, 1
+                ], 3, false,));
+                geo.setIndex([0, 1, 2]);
+            }
+            this.meshObj = new Mesh(geo, material);
+            this.meshObj.frustumCulled = false;
             const pickRT = new WebGLRenderTarget(1, 1);
             const pixelBuffer = new Uint8Array(4);
             this.pickObj = {pickRT, pixelBuffer}
@@ -252,7 +263,6 @@ async function DataSeriesTINLayerBuilder() {
                 fullExtent.height / state.resolution
             ]
 
-            uniform.u_rotation.value.identity().rotate(rotate);
             //1.点转为相对于extent归一化坐标(in shader)
             uniform.u_transform.value.identity()
                 // 2.转为相对于extent的坐标(y轴向上),(屏幕像素单位y轴向下),
@@ -266,7 +276,7 @@ async function DataSeriesTINLayerBuilder() {
                 )
                 //3.应用旋转
                 .premultiply(
-                    uniform.u_rotation.value
+                    _mat3.identity().rotate(rotate)
                 )
                 //4.添加偏移,转为屏幕像素坐标
                 .premultiply(
@@ -384,30 +394,66 @@ async function DataSeriesTINLayerBuilder() {
             }
         },
 
-        setTINMesh({vertex, index}) {
+        _getTriangleByPickIndex: null,
+
+        setTINMesh({vertex}) {
             const {meshObj} = this;
             meshObj.geometry.dispose();
-            const geometry = meshObj.geometry = new BufferGeometry();
+            const geometry = meshObj.geometry;
+            Object.keys(geometry.attributes).forEach(key => {
+                if (key !== 'position') {
+                    geometry.deleteAttribute(key);
+                }
+            })
 
-            const indexCount = index.length;
-            const tinCount = indexCount / 3;
-            if ((tinCount >> 0) !== tinCount) throw new Error('tin 索引数目不对,无法被3整除');
-            geometry.setAttribute('a_position', new Float32BufferAttribute(
-                new Float32Array(vertex), 2, false));
-            /*geometry.setAttribute('a_pickColor', new Uint8ClampedBufferAttribute(
-                new Uint8ClampedArray(4 * indexCount)
-            ), 4, true);
-            geometry.setAttribute('a_dataIndex', new Float32BufferAttribute(
-                new Float32Array(indexCount)
-            ), 1, false);*/
+            const tinCount = vertex.length / 6; //三角形数目
+            if ((tinCount >> 0) !== tinCount) throw new Error('tin三角网顶点数组无法被6整除');
 
-            geometry.setIndex(new Uint32BufferAttribute(index, 1));
+            [
+                ['instance_p0', 0],
+                ['instance_p1', 2],
+                ['instance_p2', 4],
+            ].forEach(([name, offset]) => {
+                geometry.setAttribute(name,
+                    new InterleavedBufferAttribute(
+                        new InstancedInterleavedBuffer(vertex, 6),
+                        2, offset, false
+                    ))
+            })
+
+            const ibufPickColor = new Uint8ClampedArray(tinCount * 4);
+            for (let i = 0; i < tinCount; i++) {
+                const i4 = i * 4;
+                const pickColor = id2RGBA(i + 1);
+                ibufPickColor[i4] = pickColor[0];
+                ibufPickColor[i4 + 1] = pickColor[1];
+                ibufPickColor[i4 + 2] = pickColor[2];
+                ibufPickColor[i4 + 3] = pickColor[3];
+            }
+            geometry.setAttribute('instance_pickColor',
+                new InstancedBufferAttribute(ibufPickColor, 4, true)
+            )
+
             this.bufferReady = true;
+            this._getTriangleByPickIndex = (index) => {
+                const i6 = index * 6;
+                const p0 = [vertex[i6], vertex[i6 + 1]];
+                const p1 = [vertex[i6 + 2], vertex[i6 + 3]];
+                const p2 = [vertex[i6 + 4], vertex[i6 + 5]];
+                return new Graphic({
+                    geometry: {
+                        type: 'polygon',
+                        rings: [[p0, p1, p2, p0]]
+                    },
+                    sourceLayer: this.layer,
+                    layer: this.layer
+                })
+            }
             this.requestRender();
         },
 
         hitTest: function (...args) {
-            return null
+            if (!this._getTriangleByPickIndex) return Promise.resolve(null);
             let point;
             if (ARCGIS_VERSION <= 4.21) {
                 // (x, y)
@@ -419,8 +465,8 @@ async function DataSeriesTINLayerBuilder() {
             }
 
             if (!this.layer.visible
-                || !this.layer.fullExtent
-                || !this.layer.fullExtent.contains(point)
+                || !this.fullExtent
+                || !this.fullExtent.contains(point)
             ) return Promise.resolve(null);
 
             const state = this.view.state;
@@ -436,36 +482,40 @@ async function DataSeriesTINLayerBuilder() {
             renderer.readRenderTargetPixels(pickRT, 0, 0, 1, 1, pixelBuffer);
             const id = RGBA2Id(pixelBuffer);
             if (id > 0) {
-                const pickNdx = id - 1;
-                const g = this.layer.graphics.getItemAt(pickNdx);
-                return Promise.resolve(g || null);
+                return Promise.resolve(this._getTriangleByPickIndex(id - 1) || null);
             } else {
                 return Promise.resolve(null);
             }
         },
-        updateHitTestRenderParams(state, point) {
-            const {meshObj} = this;
+        updateHitTestRenderParams(state) {
+            const {meshObj, fullExtent, view} = this;
             meshObj.material.blending = NoBlending;
             const uniform = meshObj.material.uniforms;
             const rotate = -(Math.PI * state.rotation) / 180;
 
-            uniform.u_rotation.value.identity().rotate(rotate);
+            const point = view.toScreen({
+                x: fullExtent.xmin,
+                y: fullExtent.ymin,
+                spatialReference: fullExtent.spatialReference
+            });
+            const extentPixels = [
+                fullExtent.width / state.resolution,
+                fullExtent.height / state.resolution
+            ]
+
             uniform.u_transform.value.identity()
                 .premultiply(
                     _mat3.identity().scale(
-                        state.size[0] / state.resolution,
-                        -state.size[1] / state.resolution
+                        extentPixels[0],
+                        -extentPixels[1]
                     )
                 )
                 .premultiply(
-                    uniform.u_rotation.value
+                    _mat3.identity().rotate(rotate)
                 )
                 .premultiply(
-                    _mat3.identity().translate(
-                        state.size[0] / 2,
-                        state.size[1] / 2
-                    )
-                );
+                    _mat3.identity().translate(point.x, point.y)
+                )
             uniform.u_display.value.identity()
                 .premultiply(
                     _mat3.identity().scale(
@@ -476,9 +526,6 @@ async function DataSeriesTINLayerBuilder() {
                 .premultiply(
                     _mat3.identity().translate(-1, 1)
                 )
-            const [hx, lx] = doubleToTwoFloats(point.x);
-            const [hy, ly] = doubleToTwoFloats(point.y);
-            uniform.u_center.value.set(hx, hy, lx, ly);
             uniform.u_isPick.value = true;
         },
     });
