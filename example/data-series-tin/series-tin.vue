@@ -199,6 +199,13 @@ export default {
                 },
                 tinMesh: {
                     vertex: vertexData,
+                    extent: {
+                        xmin,
+                        xmax,
+                        ymin,
+                        ymax,
+                        spatialReference: {wkid: 4326}
+                    }
                 },
                 data: [
                     [0, [0, 4]],

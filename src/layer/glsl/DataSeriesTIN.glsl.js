@@ -4,14 +4,15 @@ export const DataSeriesTINVertexShader = `
     uniform mat3 u_transform;
     uniform mat3 u_display;
     uniform bool u_isPick;
+    uniform vec4 u_center;
     //uniform vec2 u_texSize;
 
 
     attribute vec3 position;
     
-    attribute vec2 instance_p0;
-    attribute vec2 instance_p1;
-    attribute vec2 instance_p2;
+    attribute vec4 instance_p0;
+    attribute vec4 instance_p1;
+    attribute vec4 instance_p2;
     
     attribute vec4 instance_pickColor;
     //attribute float a_dataIndex;
@@ -20,12 +21,10 @@ export const DataSeriesTINVertexShader = `
     varying vec4 v_pick_color;
     varying vec3 v_barycentric;
     void main() {
-        vec2 pos = position.x == 1.0 ? instance_p0 
-                            : (position.y == 1.0 ? instance_p1 : instance_p2);
-        //相对于extent的归一化位置
-        pos = (pos - u_extent.xy) / u_extent.zw;
-       
-        gl_Position.xy = (u_display * u_transform * vec3(pos, 1.0)).xy;
+        vec4 pos = position.x == 1.0 ? instance_p0 
+                            : (position.y == 1.0 ? instance_p1 : instance_p2);  
+        vec2 worldPos = (pos.xy - u_center.xy) + (pos.zw - u_center.zw);
+        gl_Position.xy = (u_display * u_transform * vec3(worldPos, 1.0)).xy;
         gl_Position.zw = vec2(0.0, 1.0);
         
         //float col = mod(a_dataIndex, u_texSize.x); //第几列

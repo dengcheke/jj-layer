@@ -6,7 +6,21 @@ define([
     function mix(x, y, a) {
         return x + (y - x) * a;
     }
-
+    function doubleToTwoFloats(value) {
+        let high, low, tempHigh;
+        if (value >= 0) {
+            if (value < 65536) return [0, value];
+            tempHigh = Math.floor(value / 65536) * 65536;
+            high = tempHigh;
+            low = value - tempHigh;
+        } else {
+            if (value > -65536) return [0, value];
+            tempHigh = Math.floor(-value / 65536) * 65536;
+            high = -tempHigh;
+            low = value + tempHigh;
+        }
+        return [high, low];
+    }
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -644,9 +658,47 @@ define([
         }
     }
 
+    function projectTINMesh({data, sourceSR, targetSR}) {
+        return projection.load().then(() => {
+            const vertex = new Float32Array(data);
+            const sr = new SpatialReference(targetSR);
+
+            const pointCount = vertex.length / 2;
+            const projectVertex = new Float32Array(pointCount * 4);
+            for (let i = 0; i < pointCount; i++) {
+                const i2 = i * 2, i4 = i * 4;
+                const point = {
+                    x: vertex[i2],
+                    y: vertex[i2 + 1],
+                    spatialReference: sourceSR,
+                }
+                const projectPoint = projection.project(point, sr);
+                const [hx, lx] = doubleToTwoFloats(projectPoint.x);
+                const [hy, ly] = doubleToTwoFloats(projectPoint.y);
+                if(isNaN(hx) || isNaN(lx) || isNaN(hy) || isNaN(ly)){
+                    debugger
+                }
+                projectVertex[i4] = hx;
+                projectVertex[i4 + 1] = hy;
+                projectVertex[i4 + 2] = lx;
+                projectVertex[i4 + 3] = ly;
+            }
+
+            return {
+                result: {
+                    buffer: projectVertex.buffer,
+                },
+                transferList: [
+                    projectVertex.buffer,
+                ]
+            }
+        });
+    }
+
     return {
         tessellateFlowLine,
-        createRasterFlowLineMesh
+        createRasterFlowLineMesh,
+        projectTINMesh
     }
 })
 

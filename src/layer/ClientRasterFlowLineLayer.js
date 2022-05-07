@@ -24,9 +24,9 @@ import {RenderPass} from "three/examples/jsm/postprocessing/RenderPass";
 import {FullScreenQuad} from "three/examples/jsm/postprocessing/Pass";
 import {EffectComposer} from "three/examples/jsm/postprocessing/EffectComposer";
 import {CopyShader} from "three/examples/jsm/shaders/CopyShader";
+import {WORKER_PATH} from "@src/layer/commom";
 
 const _mat3 = new Matrix3();
-const WORKER_PATH = 'customWorkers/cjj-worker'
 
 async function ClientRasterFlowLineLayerBuilder() {
     const [

@@ -20,6 +20,7 @@ import {
 } from 'three'
 import {FlowLineFragShader, FlowLineVertexShader} from "@src/layer/glsl/FlowLine.glsl";
 import {buildModule} from "@src/builder";
+import {WORKER_PATH} from "@src/layer/commom";
 
 //version check 4.12 - 4.22
 const DEFAULT_CONFIG = {
@@ -35,7 +36,6 @@ const Flags = Object.freeze({
     data: 'data',
     appear: 'appear'
 })
-const WORKER_PATH = 'customWorkers/cjj-worker'
 
 async function FlowingLineLayerBuilder() {
     const [

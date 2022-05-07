@@ -28,7 +28,7 @@ async function build(file) {
                 ],
                 babelHelpers:'bundled'
             }),
-            terser()
+            //terser()
         ],
         external: id => {
             return /^esri\//.test(id);

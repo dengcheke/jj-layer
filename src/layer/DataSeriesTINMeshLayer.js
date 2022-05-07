@@ -1,5 +1,5 @@
 import * as esriLoader from "esri-loader"
-import {genColorRamp, getRenderTarget, id2RGBA, near2PowMax, RGBA2Id} from "@src/utils";
+import {doubleToTwoFloats, genColorRamp, getRenderTarget, id2RGBA, near2PowMax, RGBA2Id} from "@src/utils";
 import {
     AlphaFormat,
     CustomBlending,
@@ -26,6 +26,7 @@ import {
 } from "three";
 import {buildModule} from "@src/builder";
 import {DataSeriesTINFragShader, DataSeriesTINVertexShader} from "@src/layer/glsl/DataSeriesTIN.glsl";
+import {WORKER_PATH} from "@src/layer/commom";
 
 const _mat3 = new Matrix3()
 const DEFAULT_COLOR_STOPS = [
@@ -34,11 +35,12 @@ const DEFAULT_COLOR_STOPS = [
 ]
 
 async function DataSeriesTINLayerBuilder() {
-    let [Accessor, Graphic, Layer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
+    let [Accessor, Graphic, Layer, workers, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
         = await esriLoader.loadModules([
         "esri/core/Accessor",
         "esri/Graphic",
         "esri/layers/Layer",
+        "esri/core/workers",
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/geometry/geometryEngineAsync",
         "esri/geometry/Extent",
@@ -81,7 +83,7 @@ async function DataSeriesTINLayerBuilder() {
                 uniforms: {
                     u_transform: {value: new Matrix3()},
                     u_display: {value: new Matrix3()},
-                    u_extent: {value: new Vector4()},
+                    u_center: {value: new Vector4()},
                     u_percent: {value: 0},
                     u_texSize: {value: new Vector2()},
                     u_valueRange: {value: new Vector2()},
@@ -123,26 +125,6 @@ async function DataSeriesTINLayerBuilder() {
             this._handlers.push(layer.watch('tinMesh', () => {
                 this.setTINMesh(this.layer.tinMesh);
             }));
-            const extentHandle = async () => {
-                const viewSR = this.view.spatialReference;
-                const ext = layer?.fullExtent;
-                if (!viewSR || !ext) {
-                    this.fullExtent = null;
-                    return;
-                }
-                if (!viewSR.equals(ext)) {
-                    await projection.load();
-                    this.fullExtent = projection.project(ext, viewSR);
-                }
-                material.uniforms.u_extent.value.set(
-                    ext.xmin,
-                    ext.ymin,
-                    ext.xmax - ext.xmin,
-                    ext.ymax - ext.ymin
-                )
-                this.requestRender();
-            }
-            this._handlers.push(layer.watch('fullExtent', extentHandle));
             const dataHandle = () => {
                 if (this.destroyed) return;
                 const data = layer.data;
@@ -210,7 +192,6 @@ async function DataSeriesTINLayerBuilder() {
             }
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
 
-            layer.fullExtent && extentHandle();
             layer.tinMesh && this.setTINMesh(layer.tinMesh)
             layer.data && dataHandle();
             renderOpts.colorStops && colorStopsHandle();
@@ -227,8 +208,8 @@ async function DataSeriesTINLayerBuilder() {
             const state = renderParameters.state;
             if (!this.layer.visible
                 || !this.layer.renderOpts.valueRange
-                || !this.layer.fullExtent
-                || !this.fullExtent
+                //|| !this.layer.fullExtent
+                //|| !this.fullExtent
                 //|| !state.extent.intersects(this.layer.fullExtent)
             ) return;
             if (!this.meshObj?.material.uniforms.u_colorRamp.value?.isReady) return;
@@ -247,41 +228,26 @@ async function DataSeriesTINLayerBuilder() {
         },
 
         updateRenderParams: function (state) {
-            const {meshObj, layer, fullExtent, view} = this;
+            const {meshObj, layer} = this;
             meshObj.material.blending = CustomBlending;
             const uniform = meshObj.material.uniforms;
             const rotate = -(Math.PI * state.rotation) / 180;
-            //extent左下角在屏幕上的坐标
-            const point = view.toScreen({
-                x: fullExtent.xmin,
-                y: fullExtent.ymin,
-                spatialReference: fullExtent.spatialReference
-            });
-            //extent对应的像素宽高
-            const extentPixels = [
-                fullExtent.width / state.resolution,
-                fullExtent.height / state.resolution
-            ]
-
-            //1.点转为相对于extent归一化坐标(in shader)
             uniform.u_transform.value.identity()
-                // 2.转为相对于extent的坐标(y轴向上),(屏幕像素单位y轴向下),
-                // extentPixels 是在非旋转情况下计算的,
-                // resolution不受旋转影响,需要先转为像素坐标
                 .premultiply(
                     _mat3.identity().scale(
-                        extentPixels[0],
-                        -extentPixels[1]
+                        1 / state.resolution,
+                        -1 / state.resolution
                     )
                 )
-                //3.应用旋转
                 .premultiply(
                     _mat3.identity().rotate(rotate)
                 )
-                //4.添加偏移,转为屏幕像素坐标
                 .premultiply(
-                    _mat3.identity().translate(point.x, point.y)
-                )
+                    _mat3.identity().translate(
+                        state.size[0] / 2,
+                        state.size[1] / 2
+                    )
+                );
             //屏幕转ndc
             uniform.u_display.value.identity()
                 .premultiply(
@@ -294,7 +260,10 @@ async function DataSeriesTINLayerBuilder() {
                     _mat3.identity().translate(-1, 1)
                 )
 
+            const [hx, lx] = doubleToTwoFloats(state.center[0]);
+            const [hy, ly] = doubleToTwoFloats(state.center[1]);
 
+            uniform.u_center.value.set(hx, hy, lx, ly);
             uniform.u_isPick.value = false;
             uniform.u_percent.value = this.percent;
             const renderOpts = layer.renderOpts;
@@ -396,8 +365,8 @@ async function DataSeriesTINLayerBuilder() {
 
         _getTriangleByPickIndex: null,
 
-        setTINMesh({vertex}) {
-            const {meshObj} = this;
+        async setTINMesh({vertex, extent}) {
+            const {meshObj, view} = this;
             meshObj.geometry.dispose();
             const geometry = meshObj.geometry;
             Object.keys(geometry.attributes).forEach(key => {
@@ -409,15 +378,21 @@ async function DataSeriesTINLayerBuilder() {
             const tinCount = vertex.length / 6; //三角形数目
             if ((tinCount >> 0) !== tinCount) throw new Error('tin三角网顶点数组无法被6整除');
 
+            const projectVertex = await this.projectTINMesh(
+                vertex,
+                {wkid: extent.spatialReference.wkid},
+                {wkid:view.spatialReference.wkid}
+            );
+
             [
                 ['instance_p0', 0],
-                ['instance_p1', 2],
-                ['instance_p2', 4],
+                ['instance_p1', 4],
+                ['instance_p2', 8],
             ].forEach(([name, offset]) => {
                 geometry.setAttribute(name,
                     new InterleavedBufferAttribute(
-                        new InstancedInterleavedBuffer(vertex, 6),
-                        2, offset, false
+                        new InstancedInterleavedBuffer(projectVertex, 12),
+                        4, offset, false
                     ))
             })
 
@@ -451,7 +426,20 @@ async function DataSeriesTINLayerBuilder() {
             }
             this.requestRender();
         },
-
+        async projectTINMesh(vertex, sourceSr, targetSr) {
+            const connect = await workers.open(WORKER_PATH);
+            const {buffer} = await connect.invoke(
+                'projectTINMesh',
+                {
+                    data: vertex.buffer,
+                    sourceSR: sourceSr,
+                    targetSR: targetSr
+                }, {
+                    transferList: [vertex.buffer]
+                });
+            connect.close();
+            return new Float32Array(buffer);
+        },
         hitTest: function (...args) {
             if (!this._getTriangleByPickIndex) return Promise.resolve(null);
             let point;
