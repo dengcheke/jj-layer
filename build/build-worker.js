@@ -6,29 +6,31 @@ const rollup = require('rollup');
 const fs = require('fs');
 const terser = require("rollup-plugin-terser").terser;
 const srcPath = path.resolve(__dirname, "../workers");
-const outputPath = path.resolve(__dirname,'../dist/workers')
+const outputPath = path.resolve(__dirname, '../dist/workers')
+
 async function build(file) {
     const bundle = await rollup.rollup({
         input: file,
         plugins: [
-            nodeResolve(),
+            /*nodeResolve(),
             commonjs(),
             babel({
                 babelrc: false,
-                exclude: ['node_modules/**','esri/**'],
+                exclude: ['node_modules/!**', 'esri/!**'],
                 presets: [
                     [
                         "@babel/preset-env",
                         {
+                            targets: "supports class, not ie <= 11",
                             modules: false,
-                            useBuiltIns:"usage",
-                            corejs:3
+                            useBuiltIns: "usage",
+                            corejs: 3
                         }
                     ]
                 ],
-                babelHelpers:'bundled'
-            }),
-            //terser()
+                babelHelpers: 'bundled'
+            }),*/
+            terser()
         ],
         external: id => {
             return /^esri\//.test(id);
@@ -37,7 +39,7 @@ async function build(file) {
     const filename = path.basename(file);
     const outputOpts = {
         output: {
-            file: path.join(outputPath,filename),
+            file: path.join(outputPath, filename),
             format: "amd"
         },
     }

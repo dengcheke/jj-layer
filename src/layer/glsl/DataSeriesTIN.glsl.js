@@ -1,36 +1,35 @@
 export const DataSeriesTINVertexShader = `
     precision highp float;
-    uniform vec4 u_extent; // xmin, ymin, width, height
     uniform mat3 u_transform;
     uniform mat3 u_display;
     uniform bool u_isPick;
-    uniform vec4 u_center;
-    //uniform vec2 u_texSize;
+    uniform vec2 u_offset;
+    uniform vec2 u_texSize;
 
 
     attribute vec3 position;
     
-    attribute vec4 instance_p0;
-    attribute vec4 instance_p1;
-    attribute vec4 instance_p2;
+    attribute vec2 instance_p0;
+    attribute vec2 instance_p1;
+    attribute vec2 instance_p2;
     
     attribute vec4 instance_pickColor;
-    //attribute float a_dataIndex;
+    attribute float instance_dataIndex;
     
-    //varying vec2 v_col_row;
+    varying vec2 v_col_row;
     varying vec4 v_pick_color;
     varying vec3 v_barycentric;
     void main() {
-        vec4 pos = position.x == 1.0 ? instance_p0 
+        vec2 pos = position.x == 1.0 ? instance_p0 
                             : (position.y == 1.0 ? instance_p1 : instance_p2);  
-        vec2 worldPos = (pos.xy - u_center.xy) + (pos.zw - u_center.zw);
+        vec2 worldPos = pos + u_offset;
         gl_Position.xy = (u_display * u_transform * vec3(worldPos, 1.0)).xy;
         gl_Position.zw = vec2(0.0, 1.0);
         
-        //float col = mod(a_dataIndex, u_texSize.x); //第几列
-        //float row = floor(a_dataIndex / u_texSize.x); //第几行
+        float col = mod(instance_dataIndex, u_texSize.x); //第几列
+        float row = floor(instance_dataIndex / u_texSize.x); //第几行
         
-        //v_col_row = vec2(col, row);
+        v_col_row = vec2(col, row);
         v_pick_color = instance_pickColor;   
         v_barycentric = position;
     }
@@ -47,8 +46,10 @@ export const DataSeriesTINFragShader = `
     uniform bool u_isPick;
     uniform vec2 u_valueRange;
     uniform vec2 u_texSize;
+    uniform vec3 u_meshColor;   
+    uniform bool u_showMesh;
     
-    //varying vec2 v_col_row;
+    varying vec2 v_col_row;
     varying vec4 v_pick_color;
     varying vec3 v_barycentric;
     
@@ -62,12 +63,29 @@ export const DataSeriesTINFragShader = `
         if(u_isPick){
             gl_FragColor = v_pick_color;
         }else{
-            float factor = edgeFactor();
-            gl_FragColor.rgb = mix(vec3(1), v_pick_color.rgb, factor);
-            gl_FragColor.a = 1.0;
+            vec2 onePixel = 1.0 / u_texSize;
+            vec2 halfOnePixel = onePixel / 2.0;
+            vec2 uv = v_col_row * onePixel + halfOnePixel;
+            
+            float v1 = texture2D(u_beforeTex, uv).a;
+            float v2 = texture2D(u_afterTex, uv).a;
+            float v = mix(v1, v2, u_percent);
+            float MIN = u_valueRange[0];
+            float MAX = u_valueRange[1];
+            MAX = MIN == MAX ? MIN + 1.0 : MAX;
+            v = (v - MIN) / (MAX - MIN);
+            vec4 color = texture2D(u_colorRamp, vec2(v, 0.5));
+            
+            if(u_showMesh){
+                float factor = edgeFactor();
+                gl_FragColor = mix(vec4(u_meshColor,1.0), color, factor);
+            }else{
+                gl_FragColor = vec4(color);
+            }      
         }
     }
 `
+
 /*
 if(!u_isPick){
     vec2 onePixel = 1.0 / u_texSize;

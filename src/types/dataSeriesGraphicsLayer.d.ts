@@ -1,7 +1,7 @@
 /// <reference types="arcgis-js-api" />
 
 import * as GraphicsLayer from 'esri/layers/GraphicsLayer';
-import {ColorStops, TimeSeriesRasterBufferSet} from "./common";
+import {ColorStops, TimeSeriesBufferArray} from "./common";
 
 interface DataSeriesRenderOpts {
     colorStops?: ColorStops,
@@ -11,13 +11,13 @@ interface DataSeriesRenderOpts {
 interface DataSeriesGraphicsLayerProperties extends __esri.GraphicsLayerProperties {
     renderOpts?: DataSeriesRenderOpts,
     curTime?: number,
-    data?: TimeSeriesRasterBufferSet
+    data?: TimeSeriesBufferArray
 }
 
 interface DataSeriesGraphicsLayer extends GraphicsLayer {
     renderOpts: DataSeriesRenderOpts,
     curTime: number,
-    data: TimeSeriesRasterBufferSet,
+    data: TimeSeriesBufferArray,
     getDataByIndex(graphic_valIndex:number): Array<[number, number]>
 }
 

@@ -2,9 +2,19 @@ import * as geometryEngine from "esri/geometry/geometryEngine";
 import * as projection from "esri/geometry/projection";
 import SpatialReference from "esri/geometry/SpatialReference";
 
-function clamp( value, min, max ) {
-    return Math.max( min, Math.min( max, value ) );
+function id2RGBA(id) {
+    return [
+        ((id >> 0) & 0xFF), //r
+        ((id >> 8) & 0xFF), //g
+        ((id >> 16) & 0xFF), //b
+        ((id >> 24) & 0xFF) //a
+    ]
 }
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
 function mix(x, y, a) {
     return x + (y - x) * a;
 }
@@ -461,12 +471,12 @@ export function createRasterFlowLineMesh({data, setting}) {
     const paths = buildRasterPaths(setting, sampler, data.width, data.height);
     const {buffer1, buffer2, buffer3} = toBuffer(paths);
     return {
-        result:{
+        result: {
             buffer1: buffer1.buffer,
             buffer2: buffer2.buffer,
             buffer3: buffer3.buffer,
         },
-        transferList:[
+        transferList: [
             buffer1.buffer,
             buffer2.buffer,
             buffer3.buffer,
@@ -567,7 +577,7 @@ export function createRasterFlowLineMesh({data, setting}) {
         const _vec2 = new Vector2();
         points.push({x: startX, y: startY, t: time});
         for (let i = 0; i < setting.verticesPerLine; i++) {
-            if(i && !inRange(curPoint.x, curPoint.y)) break;
+            if (i && !inRange(curPoint.x, curPoint.y)) break;
             const uv = _vec2.set(...sampler(curPoint.x, curPoint.y)).multiplyScalar(setting.velocityScale);
             const speed = uv.length();
             if (speed < setting.minSpeedThreshold) break;
@@ -634,14 +644,65 @@ export function createRasterFlowLineMesh({data, setting}) {
         }
     }
 
-    function createRangeCheck(limit){
-        const [xmin,xmax,ymin,ymax] = limit;
-        return (x,y)=>{
+    function createRangeCheck(limit) {
+        const [xmin, xmax, ymin, ymax] = limit;
+        return (x, y) => {
             return x >= xmin && x <= xmax && y >= ymin && y <= ymax;
         }
     }
 }
 
+export function processTINMeshPart({data, sourceSR, targetSR, offsetCenter, pickIndexOffset}) {
+    const isSameSR = sourceSR.wkid === targetSR.wkid;
+    return new Promise(resolve => {
+        if (isSameSR) {
+            resolve()
+        } else {
+            projection.load().then(() => resolve())
+        }
+    }).then(() => {
+        const [offsetX, offsetY] = offsetCenter;
+        const vertex = new Float64Array(data);
+        const tinCount = vertex.length / 6;
 
+        const pickColor = new Uint8ClampedArray(tinCount * 4);
+        for (let i = 0; i < tinCount; i++) {
+            const i4 = i * 4;
+            const color = id2RGBA(i + 1 + pickIndexOffset);
+            pickColor[i4] = color[0];
+            pickColor[i4 + 1] = color[1];
+            pickColor[i4 + 2] = color[2];
+            pickColor[i4 + 3] = color[3];
+        }
 
+        const offsetVertex = new Float32Array(vertex.length);
+
+        if (!isSameSR) {
+            for (let i = 0; i < vertex.length; i += 2) {
+                const projectPoint = projection.project({
+                    x: vertex[i],
+                    y: vertex[i + 1],
+                    spatialReference: sourceSR,
+                }, targetSR);
+                offsetVertex[i] = projectPoint.x - offsetX;
+                offsetVertex[i + 1] = projectPoint.y - offsetY;
+            }
+        } else {
+            for (let i = 0; i < vertex.length; i += 2) {
+                offsetVertex[i] = vertex[i] - offsetX;
+                offsetVertex[i + 1] = vertex[i + 1] - offsetY;
+            }
+        }
+        return {
+            result: {
+                vertexBuffer: offsetVertex.buffer,
+                pickBuffer: pickColor.buffer,
+            },
+            transferList: [
+                offsetVertex.buffer,
+                pickColor.buffer,
+            ]
+        }
+    });
+}
 

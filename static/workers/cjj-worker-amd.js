@@ -6,21 +6,16 @@ define([
     function mix(x, y, a) {
         return x + (y - x) * a;
     }
-    function doubleToTwoFloats(value) {
-        let high, low, tempHigh;
-        if (value >= 0) {
-            if (value < 65536) return [0, value];
-            tempHigh = Math.floor(value / 65536) * 65536;
-            high = tempHigh;
-            low = value - tempHigh;
-        } else {
-            if (value > -65536) return [0, value];
-            tempHigh = Math.floor(-value / 65536) * 65536;
-            high = -tempHigh;
-            low = value + tempHigh;
-        }
-        return [high, low];
+
+    function id2RGBA(id) {
+        return [
+            ((id >> 0) & 0xFF), //r
+            ((id >> 8) & 0xFF), //g
+            ((id >> 16) & 0xFF), //b
+            ((id >> 24) & 0xFF) //a
+        ]
     }
+
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -477,12 +472,12 @@ define([
         const paths = buildRasterPaths(setting, sampler, data.width, data.height);
         const {buffer1, buffer2, buffer3} = toBuffer(paths);
         return {
-            result:{
+            result: {
                 buffer1: buffer1.buffer,
                 buffer2: buffer2.buffer,
                 buffer3: buffer3.buffer,
             },
-            transferList:[
+            transferList: [
                 buffer1.buffer,
                 buffer2.buffer,
                 buffer3.buffer,
@@ -658,38 +653,55 @@ define([
         }
     }
 
-    function projectTINMesh({data, sourceSR, targetSR}) {
-        return projection.load().then(() => {
-            const vertex = new Float32Array(data);
-            const sr = new SpatialReference(targetSR);
+    function processTINMeshPart({data, sourceSR, targetSR, offsetCenter, pickIndexOffset}) {
+        const isSameSR = sourceSR.wkid === targetSR.wkid;
+        return new Promise(resolve => {
+            if (isSameSR) {
+                resolve()
+            } else {
+                projection.load().then(() => resolve())
+            }
+        }).then(() => {
+            const [offsetX, offsetY] = offsetCenter;
+            const vertex = new Float64Array(data);
+            const tinCount = vertex.length / 6;
 
-            const pointCount = vertex.length / 2;
-            const projectVertex = new Float32Array(pointCount * 4);
-            for (let i = 0; i < pointCount; i++) {
-                const i2 = i * 2, i4 = i * 4;
-                const point = {
-                    x: vertex[i2],
-                    y: vertex[i2 + 1],
-                    spatialReference: sourceSR,
-                }
-                const projectPoint = projection.project(point, sr);
-                const [hx, lx] = doubleToTwoFloats(projectPoint.x);
-                const [hy, ly] = doubleToTwoFloats(projectPoint.y);
-                if(isNaN(hx) || isNaN(lx) || isNaN(hy) || isNaN(ly)){
-                    debugger
-                }
-                projectVertex[i4] = hx;
-                projectVertex[i4 + 1] = hy;
-                projectVertex[i4 + 2] = lx;
-                projectVertex[i4 + 3] = ly;
+            const pickColor = new Uint8ClampedArray(tinCount * 4);
+            for (let i = 0; i < tinCount; i++) {
+                const i4 = i * 4;
+                const color = id2RGBA(i + 1 + pickIndexOffset);
+                pickColor[i4] = color[0];
+                pickColor[i4 + 1] = color[1];
+                pickColor[i4 + 2] = color[2];
+                pickColor[i4 + 3] = color[3];
             }
 
+            const offsetVertex = new Float32Array(vertex.length);
+
+            if (!isSameSR) {
+                for (let i = 0; i < vertex.length; i += 2) {
+                    const projectPoint = projection.project({
+                        x: vertex[i],
+                        y: vertex[i + 1],
+                        spatialReference: sourceSR,
+                    }, targetSR);
+                    offsetVertex[i] = projectPoint.x - offsetX;
+                    offsetVertex[i + 1] = projectPoint.y - offsetY;
+                }
+            } else {
+                for (let i = 0; i < vertex.length; i += 2) {
+                    offsetVertex[i] = vertex[i] - offsetX;
+                    offsetVertex[i + 1] = vertex[i + 1] - offsetY;
+                }
+            }
             return {
                 result: {
-                    buffer: projectVertex.buffer,
+                    vertexBuffer: offsetVertex.buffer,
+                    pickBuffer: pickColor.buffer,
                 },
                 transferList: [
-                    projectVertex.buffer,
+                    offsetVertex.buffer,
+                    pickColor.buffer,
                 ]
             }
         });
@@ -698,7 +710,7 @@ define([
     return {
         tessellateFlowLine,
         createRasterFlowLineMesh,
-        projectTINMesh
+        processTINMeshPart
     }
 })
 

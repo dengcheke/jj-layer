@@ -2,11 +2,6 @@
     <div style="position: relative;width: 100%;height: 100%">
         <div class="map-wrapper base" ref="map"/>
         <div class="control-panel">
-            <el-select v-model="curSelectType" size="small" filterable @change="handleTypeChange"
-                       placeholder="选择查看类型">
-                <el-option v-for="item in types" :key="item.key"
-                           :label="item.key" :value="item.key"/>
-            </el-select>
             <div class="value-range">
                 <span class="sub-title">{{ curSelectType }}</span>
                 <span class="label-left" style="width: 20px">{{ (curMin || 0).toFixed(1) }}</span>
@@ -18,6 +13,14 @@
                 <time-player :min="timeRange[0]" style="flex:1"
                              :max="timeRange[1]"
                              :step="0.5" @input="handleTimeChange"/>
+            </div>
+            <div class="grid-set">
+                <el-checkbox v-model="showMesh" @change="handleShowMesh">显示网格</el-checkbox>
+
+            </div>
+            <div class="value-range">
+                <span class="sub-title" style="width:32px;">网格颜色</span>
+                <el-input type="color" v-model="meshColor" style="width: 120px" @input="handleMeshColor"/>
             </div>
             <ele-rw-dialog :class-list="['section-line-chart']" append-to-body
                            keep-position :width="720"
@@ -38,45 +41,37 @@
 <script>
 import {loadModules} from "esri-loader";
 import {isNil} from "../utils";
-import colorStops from './color-step.png'
-import {SECTION_DATA_INFO} from "./config";
 import TimePlayer from '../common/time-player'
 import {loadDataSeriesTINLayer} from "@src/layer/DataSeriesTINMeshLayer";
 import axios from "axios";
 import throttle from "lodash/throttle";
+import {genColorRamp} from "@src/utils";
 
+const colorStops = genColorRamp([
+    {value: 0, color: 'yellow'},
+    {value: 0.5, color: 'green'},
+    {value: 0.5, color: 'blue'},
+    {value: 1, color: 'red'}
+])
 export default {
     name: "series-tin-layer",
     components: {TimePlayer},
     data() {
         return {
             layerId: 'CUSTOM_LAYER',
-            types: Object.keys(SECTION_DATA_INFO).reduce((res, series) => {
-                res[series] = {
-                    key: series,
-                    min: null,
-                    max: null,
-                    data: null
-                };
-                return res;
-            }, {}),
             curSelectType: 'COD',
             showDialog: false,
             colorRamp: colorStops,
-            timeRange: [1, 288],
+            timeRange: [0, 1],
             chartData: [],
-            index: null
+            index: null,
+            curMin: 0,
+            curMax: 0,
+            showMesh: false,
+            meshColor: 'white'
         }
     },
     computed: {
-        curMax() {
-            const i = this.curSelectType ? this.types[this.curSelectType].max : null;
-            return isNil(i) ? "" : i;
-        },
-        curMin() {
-            const i = this.curSelectType ? this.types[this.curSelectType].min : null;
-            return isNil(i) ? "" : i;
-        },
         option() {
             return {
                 tooltip: {
@@ -120,6 +115,12 @@ export default {
         });
     },
     methods: {
+        handleShowMesh(v){
+            this.layer && (this.layer.renderOpts.showMesh = v);
+        },
+        handleMeshColor(v){
+            this.layer && (this.layer.renderOpts.meshColor = v);
+        },
         handleChange(v) {
             this.layer && (this.layer.curTime = v);
         },
@@ -143,77 +144,62 @@ export default {
                     spatialReference: {wkid: 4326}
                 },
                 spatialReference: {wkid: 3857},
-                graphics: [
-                    [119.5, 25,],
-                    [120.5, 25,],
-                    [120.5, 26,],
-                    [119.5, 25.5]
-                ].map(i => {
-                    return {
-                        geometry: {
-                            type: 'point',
-                            x: i[0],
-                            y: i[1],
-                            spatialReference: {wkid: 4326}
-                        }
-                    }
-                })
+                constraint: {
+                    maxZoom: 24
+                },
             });
+            window.__view = view;
             view.on('pointer-move', async (evt) => {
                 const hitRes = await view.hitTest(evt);
                 const f = hitRes.results.find(f => {
                     return (f.graphic.sourceLayer || f.graphic.layer || {}).id === this.layerId
                 });
+                view.graphics.removeAll();
                 if (f) {
-                    view.graphics.removeAll();
+                    f.graphic.symbol = {
+                        type: "simple-fill",
+                        color: "rgba(0,255,255,0.5)",
+                        outline: {
+                            color: "yellow",
+                            width: "2px"
+                        }
+                    }
                     view.graphics.add(f.graphic)
                 }
             })
             return {map, view}
         },
         async loadCustomLy() {
-            const originBuffer = (await axios.get('/tin/tin.bin', {
+            const vertexData = new Float32Array((await axios.get('/tin/tin.bin', {
                 responseType: "arraybuffer"
-            })).data;
-            const vertexData = new Float32Array(originBuffer);
-
-            const pointCount = vertexData.length / 2;
-            let xmin = Infinity, xmax = -Infinity;
-            let ymin = Infinity, ymax = -Infinity;
-            for (let i = 0; i < pointCount; i++) {
-                xmin = Math.min(vertexData[i * 2], xmin);
-                xmax = Math.max(vertexData[i * 2], xmax);
-                ymin = Math.min(vertexData[i * 2 + 1], ymin);
-                ymax = Math.max(vertexData[i * 2 + 1], ymax);
+            })).data);
+            const zetaData = new Float32Array((await axios.get('/tin/zeta.bin', {
+                responseType: "arraybuffer"
+            })).data);
+            let min = Infinity, max = -Infinity;
+            for (let i = 0; i < zetaData.length; i++) {
+                min = Math.min(zetaData[i], min);
+                max = Math.max(zetaData[i], max);
             }
-            console.log(xmin, xmax, ymin, ymax)
-
+            this.curMin = min;
+            this.curMax = max;
+            console.log(min, max)
             return await loadDataSeriesTINLayer({
                 id: this.layerId,
-                fullExtent: {
-                    xmin,
-                    xmax,
-                    ymin,
-                    ymax,
-                    spatialReference: {wkid: 4326}
-                },
                 tinMesh: {
                     vertex: vertexData,
-                    extent: {
-                        xmin,
-                        xmax,
-                        ymin,
-                        ymax,
-                        spatialReference: {wkid: 4326}
-                    }
+                    spatialReference: {wkid: 4326}
                 },
                 data: [
-                    [0, [0, 4]],
-                    [1, [1, 5]],
+                    [0, zetaData],
                 ],
                 renderOpts: {
-                    valueRange: [1, 10]
-                }
+                    valueRange: [min, max],
+                    colorStops: colorStops,
+                    showMesh: this.showMesh,
+                    meshColor: this.meshColor
+                },
+                curTime: 0
             })
         },
         handleTimeChange(v) {
@@ -245,7 +231,7 @@ export default {
     color: white;
 
     .value-range,
-    .filter-range,
+    .grid-set,
     .time-range {
         display: flex;
         height: 32px;

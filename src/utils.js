@@ -14,6 +14,12 @@ export function doubleToTwoFloats(value) {
     return [high, low];
 }
 
+//判断是否是Float32Array
+export function isFloat32Array(arr) {
+    return Object.prototype.toString.call(arr) === '[object Float32Array]';
+}
+
+//id转rgba, r低位 -> a高位
 export function id2RGBA(id) {
     return [
         ((id >> 0) & 0xFF), //r
@@ -27,11 +33,13 @@ export function RGBA2Id(data) {
     return data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24)
 }
 
+//是否是2的幂
 export function isPow2(nums) {
     return 0 === (nums & nums - 1)
 }
 
-export function near2PowMax(val) {
+//大于等于某个数的最接近的2的幂
+export function near2PowG(val) {
     val = +val;
     if (isNaN(val)) throw new Error('val is not number');
     if (val & (val - 1)) {
@@ -43,6 +51,46 @@ export function near2PowMax(val) {
         return val + 1;
     } else {
         return val === 0 ? 1 : val;
+    }
+}
+
+//获取webgl 纹理最优的解包长度
+export function getOptimalUnpackAlign(v) {
+    return !(v & 0b111) ? 8 : !(v & 0b11) ? 4 : !(v & 0b1) ? 2 : 1
+}
+
+//获取数组的最大最小值
+export function getMinMax(arr, ignoreVal) {
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < arr.length; i++) {
+        const v = arr[i];
+        if (v === ignoreVal || isNaN(v)) continue;
+        min = Math.min(v, min);
+        max = Math.max(v, max);
+    }
+    return {
+        min: min === Infinity ? NaN : min,
+        max: max === -Infinity ? NaN : max
+    }
+}
+
+export function nextTick() {
+    return new Promise((resolve) => {
+        Promise.resolve().then(() => resolve())
+    })
+}
+
+export function createVersionChecker(){
+    let version = 0;
+    return promise => {
+        const __version = ++version;
+        return promise.then(result=>{
+            if(__version !== version){
+                throw new Error('version not match')
+            }else{
+                return result
+            }
+        })
     }
 }
 

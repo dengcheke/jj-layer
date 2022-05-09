@@ -4,7 +4,7 @@ import {
     genColorRamp,
     getRenderTarget,
     id2RGBA,
-    near2PowMax,
+    near2PowG,
     RGBA2Id
 } from "@src/utils";
 import {
@@ -410,7 +410,12 @@ async function DataSeriesGraphicsLayerBuilder() {
                 oldBefore = this.beforeTime,
                 oldAfter = this.afterTime;
             const {maxTime, minTime} = dataset;
-            if (oldBefore !== null && oldAfter !== null && curTime >= oldBefore && curTime <= oldAfter) {
+            if (times.length > 1
+                && oldBefore !== null
+                && oldAfter !== null
+                && curTime >= oldBefore
+                && curTime <= oldAfter
+            ) {
                 this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime)
                 return;
             }
@@ -446,7 +451,7 @@ async function DataSeriesGraphicsLayerBuilder() {
             if (!len) {
                 return null;
             } else {
-                const length = near2PowMax(len);
+                const length = near2PowG(len);
                 const l = Math.log2(length);
                 const cols = Math.ceil(l / 2);
                 const rows = l - cols;
