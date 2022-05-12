@@ -64,7 +64,6 @@
 <script>
 import {loadModules} from "esri-loader";
 import axios from "axios";
-import {loadClientVectorFieldLayer} from "@layer";
 import {genColorRamp} from "@src/utils";
 import TimePlayer from '../common/time-player'
 import {VF_COLOR_STOPS, VF_DATASET, VF_META, VF_TIMES} from './config'
@@ -170,7 +169,7 @@ export default {
             VF_TIMES.forEach((t, idx) => {
                 dataArr.push([t, new Float32Array(bufs[idx].data)]);
             });
-            return loadClientVectorFieldLayer({
+            return this.$layerLoaders.loadClientVectorFieldLayer({
                 id: this.layerId,
                 renderOpts: opts,
                 data: {

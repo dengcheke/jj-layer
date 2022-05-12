@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {getRenderTarget} from "@src/utils";
 import {debounce} from 'lodash'
 import {
@@ -25,6 +24,7 @@ import {FullScreenQuad} from "three/examples/jsm/postprocessing/Pass";
 import {EffectComposer} from "three/examples/jsm/postprocessing/EffectComposer";
 import {CopyShader} from "three/examples/jsm/shaders/CopyShader";
 import {WORKER_PATH} from "@src/layer/commom";
+import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3();
 
@@ -32,7 +32,7 @@ async function ClientRasterFlowLineLayerBuilder() {
     const [
         Accessor, Layer,
         BaseLayerViewGL2D, workers, projection, kernel
-    ] = await esriLoader.loadModules([
+    ] = await loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
@@ -650,7 +650,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             },
             data: {},
             effect: {},
-            blendMode:{}
+            blendMode: {}
         },
         createLayerView: function (view) {
             if (view.type === "2d") {

@@ -12,16 +12,15 @@ async function build(file) {
     const bundle = await rollup.rollup({
         input: file,
         plugins: [
-            /*nodeResolve(),
+            nodeResolve(),
             commonjs(),
             babel({
                 babelrc: false,
-                exclude: ['node_modules/!**', 'esri/!**'],
+                exclude: ['node_modules/**', 'esri/**'],
                 presets: [
                     [
                         "@babel/preset-env",
                         {
-                            targets: "supports class, not ie <= 11",
                             modules: false,
                             useBuiltIns: "usage",
                             corejs: 3
@@ -29,7 +28,7 @@ async function build(file) {
                     ]
                 ],
                 babelHelpers: 'bundled'
-            }),*/
+            }),
             terser()
         ],
         external: id => {

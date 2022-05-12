@@ -4,7 +4,6 @@
 
 <script>
 import {loadModules} from "esri-loader";
-import {loadFlowingLineLayer} from "@layer";
 import throttle from "lodash/throttle";
 import {hlMap} from "../graphic-symbol";
 import axios from "axios";
@@ -78,7 +77,7 @@ export default {
         },
         async loadCustomLy() {
             const {data} = await axios.get(STATIC_URL +'test-line.json');
-            const ly = await loadFlowingLineLayer({
+            const ly = await this.$layerLoaders.loadFlowingLineLayer({
                 id: this.layerId,
                 graphics: data.features.map((item, idx) => {
                     const g = {

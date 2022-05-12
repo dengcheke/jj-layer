@@ -37,7 +37,6 @@
 
 <script>
 import {loadModules} from "esri-loader";
-import {loadDataSeriesGraphicsLayer, loadTip3DLayer} from '@src';
 import debounce from "lodash/debounce";
 import throttle from "lodash/throttle";
 import {hlMap} from "../graphic-symbol";
@@ -115,7 +114,7 @@ export default {
         map.add(baseLayer);
         const hlLayer = new GraphicsLayer();
         map.add(hlLayer);
-        const tip3DLayer = await loadTip3DLayer({
+        const tip3DLayer = await this.$layerLoaders.loadTip3DLayer({
             id:"tip3d",
         });
         map.add(tip3DLayer);
@@ -202,7 +201,7 @@ export default {
         },
         async loadCustomLy() {
             const graphics = await this.getGraphics();
-            return await loadDataSeriesGraphicsLayer({
+            return await this.$layerLoaders.loadDataSeriesGraphicsLayer({
                 id: this.layerId,
                 graphics: graphics,
             })

@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {doubleToTwoFloats, getRenderTarget, id2RGBA, RGBA2Id} from "@src/utils";
 import {
     BufferGeometry,
@@ -21,6 +20,7 @@ import {
 import {FlowLineFragShader, FlowLineVertexShader} from "@src/layer/glsl/FlowLine.glsl";
 import {buildModule} from "@src/builder";
 import {WORKER_PATH} from "@src/layer/commom";
+import {loadModules} from "esri-loader";
 
 //version check 4.12 - 4.22
 const DEFAULT_CONFIG = {
@@ -41,7 +41,7 @@ async function FlowingLineLayerBuilder() {
     const [
         Color, Accessor, watchUtils, GraphicsLayer,
         BaseLayerViewGL2D, Extent, workers, kernel
-    ] = await esriLoader.loadModules([
+    ] = await loadModules([
         "esri/Color",
         "esri/core/Accessor",
         "esri/core/watchUtils",

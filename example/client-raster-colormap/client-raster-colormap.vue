@@ -33,7 +33,6 @@
 <script>
 import ElSlider from 'element-ui/lib/slider';
 import {loadModules} from "esri-loader";
-import {loadClientRasterColormapLayer} from "@src";
 import cloneDeep from "lodash/cloneDeep";
 import axios from "axios";
 import {genColorRamp} from "@src/utils";
@@ -159,7 +158,7 @@ export default {
             return {map, view}
         },
         async loadCustomLy() {
-            const ly = await loadClientRasterColormapLayer({
+            const ly = await this.$layerLoaders.loadClientRasterColormapLayer({
                 id: this.layerId,
             });
             return ly

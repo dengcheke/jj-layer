@@ -13,6 +13,25 @@ import EleRwDialog from './common/ele-rw-dialog';
 
 Vue.component('EleRwDialog', EleRwDialog);
 
+import {
+    loadDataSeriesTINMeshLayer,
+    loadClientRasterFlowLineLayer,
+    loadDataSeriesGraphicsLayer,
+    loadClientVectorFieldLayer,
+    loadClientRasterColormapLayer,
+    loadTip3DLayer,
+    loadFlowingLineLayer
+} from "../dist/cjs/index";
+
+Vue.prototype.$layerLoaders = {
+    loadDataSeriesTINMeshLayer,
+    loadClientRasterFlowLineLayer,
+    loadDataSeriesGraphicsLayer,
+    loadClientVectorFieldLayer,
+    loadClientRasterColormapLayer,
+    loadTip3DLayer,
+    loadFlowingLineLayer
+}
 async function initEsriConfig() {
     const useSelfCDN = false;
     if (!useSelfCDN) {

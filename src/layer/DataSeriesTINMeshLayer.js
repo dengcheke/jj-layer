@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {
     createVersionChecker,
     genColorRamp,
@@ -34,6 +33,7 @@ import {
 import {buildModule} from "@src/builder";
 import {DataSeriesTINFragShader, DataSeriesTINVertexShader} from "@src/layer/glsl/DataSeriesTIN.glsl";
 import {WORKER_PATH} from "@src/layer/commom";
+import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3()
 const DEFAULT_COLOR_STOPS = [
@@ -55,7 +55,7 @@ function createNewGeometry() {
 async function DataSeriesTINLayerBuilder() {
     let [Accessor, Graphic, Layer, workers, SpatialReference,
         BaseLayerViewGL2D, Extent, projection, kernel]
-        = await esriLoader.loadModules([
+        = await loadModules([
         "esri/core/Accessor",
         "esri/Graphic",
         "esri/layers/Layer",
@@ -151,7 +151,8 @@ async function DataSeriesTINLayerBuilder() {
                         this.updateGeometry(result);
                         this.requestRender();
                     })
-                    .catch(e =>{});//silent
+                    .catch(e => {
+                    });//silent
             }
             this._handlers.push(layer.watch('tinMesh', geometryHandle));
 
@@ -716,7 +717,7 @@ async function DataSeriesTINLayerBuilder() {
     });
 }
 
-export async function loadDataSeriesTINLayer(opts) {
+export async function loadDataSeriesTINMeshLayer(opts) {
     const ctor = await buildModule(DataSeriesTINLayerBuilder)
     return new ctor(opts);
 }

@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {
     ConeGeometry,
     CustomBlending,
@@ -15,13 +14,14 @@ import {
 } from 'three'
 import {buildModule} from "@src/builder";
 import {getRenderTarget} from "@src/utils";
+import {loadModules} from "esri-loader";
 
 
 async function Tip3DLayerBuilder() {
     const [
         watchUtils, GraphicsLayer, BaseLayerViewGL2D,
         Extent, projection, kernel
-    ] = await esriLoader.loadModules([
+    ] = await loadModules([
         "esri/core/watchUtils",
         "esri/layers/GraphicsLayer",
         "esri/views/2d/layers/BaseLayerViewGL2D",

@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {
     doubleToTwoFloats,
     genColorRamp,
@@ -31,6 +30,7 @@ import {
 } from "three";
 import {DataSeriesGraphicFragShader, DataSeriesGraphicVertexShader} from "@src/layer/glsl/DataSeries.glsl";
 import {buildModule} from "@src/builder";
+import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3()
 const DEFAULT_COLOR_STOPS = [
@@ -44,7 +44,7 @@ const Flags = Object.freeze({
 
 async function DataSeriesGraphicsLayerBuilder() {
     let [watchUtils, Accessor, GraphicsLayer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
-        = await esriLoader.loadModules([
+        = await loadModules([
         "esri/core/watchUtils",
         "esri/core/Accessor",
         "esri/layers/GraphicsLayer",
@@ -126,7 +126,7 @@ async function DataSeriesGraphicsLayerBuilder() {
             const renderOpts = layer.renderOpts;
             let visibleWatcher = null;
             const handleGraphicChanged = async () => {
-                if(this.destroyed) return;
+                if (this.destroyed) return;
                 {
                     this.layer.fullExtent = null;
                     visibleWatcher?.remove();
@@ -140,7 +140,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const indexKey = renderOpts.indexKey;
                 const task = graphics.map(async (g, idx) => {
                     const index = indexKey ? g.attributes?.[indexKey] : idx;
-                    if(g.geometry.cache.mesh){
+                    if (g.geometry.cache.mesh) {
                         g._valIndex = index;
                         return {
                             mesh: g.geometry.cache.mesh,
@@ -148,7 +148,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                             index: index,
                             pickIdx: idx + 1,//0表示没有选中
                         }
-                    }else{
+                    } else {
                         let geo = await geometryEngineAsync.simplify(g.geometry);
                         if (!viewSR.equals(geo.spatialReference)) {
                             await projection.load();
@@ -184,7 +184,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                 })
                 const meshes = await Promise.all(task._items);
 
-                if(this.destroyed) return;
+                if (this.destroyed) return;
                 if (__version !== this.version) return;
                 this.meshes = meshes;
                 meshes.version = __version;
@@ -200,7 +200,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                 this.requestRender();
             };
             const dataHandle = () => {
-                if(this.destroyed) return;
+                if (this.destroyed) return;
                 const data = layer.data;
                 data.sort((a, b) => +a[0] - +b[0]);
                 const times = data.map(item => +item[0]);
@@ -213,11 +213,11 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const unpackAlign = texSize[0] % 8 === 0
                     ? 8
                     : (texSize[0] % 4 === 0
-                        ? 4
-                        : (texSize[0] % 2 === 0
-                            ? 2
-                            : 1
-                        )
+                            ? 4
+                            : (texSize[0] % 2 === 0
+                                    ? 2
+                                    : 1
+                            )
                     );
                 this.dataset = {
                     times: times,
@@ -290,7 +290,7 @@ async function DataSeriesGraphicsLayerBuilder() {
         },
 
         render: function (renderParameters) {
-            if(this.destroyed) return;
+            if (this.destroyed) return;
             const state = renderParameters.state;
             if (!this.layer.visible
                 || !this.layer.renderOpts.valueRange
@@ -310,7 +310,7 @@ async function DataSeriesGraphicsLayerBuilder() {
 
             const gl = this.context;
             const {renderer, meshObj, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,ARCGIS_VERSION);
+            const {framebuffer, viewport} = getRenderTarget.call(this, ARCGIS_VERSION);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -586,11 +586,11 @@ async function DataSeriesGraphicsLayerBuilder() {
 
         hitTest: function (...args) {
             let point;
-            if(ARCGIS_VERSION <= 4.21){
+            if (ARCGIS_VERSION <= 4.21) {
                 // (x, y)
                 const x = args[0], y = args[1];
                 point = this.view.toMap({x: x, y: y});
-            }else{
+            } else {
                 // (_mapPoint, screenPoint)
                 point = args[0];
             }
@@ -669,7 +669,7 @@ async function DataSeriesGraphicsLayerBuilder() {
         properties: {
             valueRange: {},
             colorStops: {},
-            indexKey:{}
+            indexKey: {}
         },
     });
     return GraphicsLayer.createSubclass({

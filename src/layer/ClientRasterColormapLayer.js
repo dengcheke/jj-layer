@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {
     AlphaFormat,
     BufferGeometry,
@@ -20,15 +19,17 @@ import {
 import {ClientRasterFragShader, ClientRasterVertexShader} from "@src/layer/glsl/RasterColormap.glsl";
 import {genColorRamp, getRenderTarget} from "@src/utils";
 import {buildModule} from "@src/builder";
+import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3();
 const defaultColorStops = Object.freeze([
     {value: 0, color: 'green'},
     {value: 1, color: 'red'},
 ])
+
 async function ClientRasterColormapLayerBuilder() {
-    const [Accessor, Layer, BaseLayerViewGL2D, projection,kernel]
-        = await esriLoader.loadModules([
+    const [Accessor, Layer, BaseLayerViewGL2D, projection, kernel]
+        = await loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
@@ -46,7 +47,7 @@ async function ClientRasterColormapLayerBuilder() {
         properties: {
             filterRange: {},
             colorStops: {},
-            valueRange:{}
+            valueRange: {}
         }
     });
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
@@ -115,7 +116,7 @@ async function ClientRasterColormapLayerBuilder() {
                     ),
                 material);
             this._handlers.push({
-                remove:()=>{
+                remove: () => {
                     this.mesh.geometry.dispose();
                     material.uniforms.u_colorRamp.value?.dispose();
                     material.uniforms.u_beforeTex.value.dispose();
@@ -127,7 +128,7 @@ async function ClientRasterColormapLayerBuilder() {
             const renderOpts = layer.renderOpts;
             let version = 1;
             const dataHandle = () => {
-                if(this.destroyed) return;
+                if (this.destroyed) return;
                 let data = layer.data;
                 if (!data) {
                     this.dataset = null;
@@ -193,7 +194,7 @@ async function ClientRasterColormapLayerBuilder() {
                 })
             }
             this._handlers.push(layer.watch('data', dataHandle));
-            this._handlers.push(layer.watch('curTime', ()=>{
+            this._handlers.push(layer.watch('curTime', () => {
                 this.requestRender();
             }));
             this._handlers.push(renderOpts.watch('valueRange', () => {
@@ -205,7 +206,7 @@ async function ClientRasterColormapLayerBuilder() {
                 this.requestRender();
             }));
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
-            this._handlers.push(renderOpts.watch('filterRange', ()=>{
+            this._handlers.push(renderOpts.watch('filterRange', () => {
                 this.requestRender();
             }));
             this._handlers.push(view.watch('extent', () => {
@@ -224,7 +225,7 @@ async function ClientRasterColormapLayerBuilder() {
         },
 
         render: function (renderParameters) {
-            if(this.destroyed) return;
+            if (this.destroyed) return;
             if (!this.layer.visible
                 || !this.layer.renderOpts.valueRange
                 || !this.dataset
@@ -239,7 +240,7 @@ async function ClientRasterColormapLayerBuilder() {
 
             const gl = this.context;
             const {renderer, mesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
+            const {framebuffer, viewport} = getRenderTarget.call(this, kernel.version);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -302,7 +303,7 @@ async function ClientRasterColormapLayerBuilder() {
             }
             uniform.u_percent.value = this.percent;
             const fr = renderOpts.filterRange || renderOpts.valueRange
-            uniform.u_filterRange.value.set(fr[0],fr[1]);
+            uniform.u_filterRange.value.set(fr[0], fr[1]);
             //tex
             if (this.needUpdateTimeTex) {
                 const {beforeTime, afterTime} = this;
@@ -316,26 +317,26 @@ async function ClientRasterColormapLayerBuilder() {
                     tex.flipY = !!flipY;
                     tex.unpackAlignment = this.dataset.unpackAlignment
                 })
-                if(this.swap){
-                    [beforeTex,afterTex] = [afterTex,beforeTex];
+                if (this.swap) {
+                    [beforeTex, afterTex] = [afterTex, beforeTex];
                     uniform.u_beforeTex.value = beforeTex;
                     uniform.u_afterTex.value = afterTex;
                     afterTex.image = {
-                        data:this.dataset.getDataByTime(afterTime),
-                        width:cols,
-                        height:rows
+                        data: this.dataset.getDataByTime(afterTime),
+                        width: cols,
+                        height: rows
                     }
                     afterTex.needsUpdate = true;
-                }else{
+                } else {
                     beforeTex.image = {
                         data: this.dataset.getDataByTime(beforeTime),
-                        width:cols,
-                        height:rows
+                        width: cols,
+                        height: rows
                     };
                     afterTex.image = {
-                        data:this.dataset.getDataByTime(afterTime),
-                        width:cols,
-                        height:rows
+                        data: this.dataset.getDataByTime(afterTime),
+                        width: cols,
+                        height: rows
                     };
                     beforeTex.needsUpdate = true;
                     afterTex.needsUpdate = true;
@@ -346,7 +347,7 @@ async function ClientRasterColormapLayerBuilder() {
         },
 
         updatePosition() {
-            if(!this.needUpdatePosition) return;
+            if (!this.needUpdatePosition) return;
             const extent = this.dataset.extent;
             if (!extent) return;
             const center = this.view.state.center;
@@ -421,8 +422,8 @@ async function ClientRasterColormapLayerBuilder() {
         },
         properties: {
             curTime: {},
-            data:{},
-            valueRange:{},
+            data: {},
+            valueRange: {},
             renderOpts: {
                 get() {
                     return this._cm;
@@ -431,8 +432,8 @@ async function ClientRasterColormapLayerBuilder() {
                     Object.assign(this._cm, v || {});
                 }
             },
-            effect:{},
-            blendMode:{}
+            effect: {},
+            blendMode: {}
         },
         createLayerView: function (view) {
             if (view.type !== "2d") throw new Error('不支持3d')

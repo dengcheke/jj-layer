@@ -40,17 +40,14 @@
 
 <script>
 import {loadModules} from "esri-loader";
-import {isNil} from "../utils";
 import TimePlayer from '../common/time-player'
-import {loadDataSeriesTINLayer} from "@src/layer/DataSeriesTINMeshLayer";
 import axios from "axios";
-import throttle from "lodash/throttle";
 import {genColorRamp} from "@src/utils";
 
 const colorStops = genColorRamp([
     {value: 0, color: 'yellow'},
     {value: 0.5, color: 'green'},
-    {value: 0.5, color: 'blue'},
+    //{value: 0.5, color: 'blue'},
     {value: 1, color: 'red'}
 ])
 export default {
@@ -115,10 +112,10 @@ export default {
         });
     },
     methods: {
-        handleShowMesh(v){
+        handleShowMesh(v) {
             this.layer && (this.layer.renderOpts.showMesh = v);
         },
-        handleMeshColor(v){
+        handleMeshColor(v) {
             this.layer && (this.layer.renderOpts.meshColor = v);
         },
         handleChange(v) {
@@ -184,7 +181,7 @@ export default {
             this.curMin = min;
             this.curMax = max;
             console.log(min, max)
-            return await loadDataSeriesTINLayer({
+            return await this.$layerLoaders.loadDataSeriesTINMeshLayer({
                 id: this.layerId,
                 tinMesh: {
                     vertex: vertexData,
@@ -208,7 +205,6 @@ export default {
             }
         },
     },
-
 }
 </script>
 

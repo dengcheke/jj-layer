@@ -1,4 +1,3 @@
-import * as esriLoader from "esri-loader"
 import {
     BufferGeometry,
     Color,
@@ -21,6 +20,7 @@ import {VectorFieldFragShader, VectorFieldVertexShader} from "@src/layer/glsl/Ve
 import ArrowImg from '@src/assets/arrow-right.svg'
 import {genColorRamp, getRenderTarget} from "@src/utils";
 import {buildModule} from "@src/builder";
+import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3()
 const defaultColorStops = Object.freeze([
@@ -30,7 +30,7 @@ const defaultColorStops = Object.freeze([
 
 async function ClientVectorFieldLayerBuilder() {
     let [Accessor, Layer, BaseLayerViewGL2D, projection, kernel]
-        = await esriLoader.loadModules([
+        = await loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
@@ -60,7 +60,7 @@ async function ClientVectorFieldLayerBuilder() {
             showGrid: {},
             arrowImg: {},
             colorStops: {},
-            valueRange:{}
+            valueRange: {}
         },
     });
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
@@ -306,7 +306,7 @@ async function ClientVectorFieldLayerBuilder() {
 
             const gl = this.context;
             const {renderer, mesh, camera} = this;
-            const {framebuffer, viewport} = getRenderTarget.call(this,kernel.version);
+            const {framebuffer, viewport} = getRenderTarget.call(this, kernel.version);
             renderer.resetState();
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -498,8 +498,8 @@ async function ClientVectorFieldLayerBuilder() {
                     Object.assign(this._vf, v || {});
                 }
             },
-            blendMode:{},
-            effect:{}
+            blendMode: {},
+            effect: {}
         },
         createLayerView: function (view) {
             if (view.type !== "2d") throw new Error('不支持3d')

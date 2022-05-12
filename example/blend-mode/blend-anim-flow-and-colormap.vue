@@ -7,7 +7,6 @@
 <script>
 import {loadModules} from "esri-loader";
 import axios from "axios";
-import {loadClientRasterColormapLayer, loadClientRasterFlowLineLayer} from "@src";
 import {genColorRamp} from "@src/utils";
 import {COD_COLOR_STOPS, COD_META} from "../client-raster-colormap/cod-config";
 import {GUI} from 'three/examples/jsm/libs/lil-gui.module.min'
@@ -40,7 +39,7 @@ export default {
             const flowbuf = (await axios.get('/simul-result/lake/vector/V_288.bin', {
                 responseType: 'arraybuffer'
             })).data;
-            flowLayer = await loadClientRasterFlowLineLayer({
+            flowLayer = await this.$layerLoaders.loadClientRasterFlowLineLayer({
                 data: {
                     extent: {
                         type: 'extent',
@@ -66,7 +65,7 @@ export default {
             const buf = (await axios.get(`/simul-result/lake/COD/COD_288.bin`, {
                 responseType: 'arraybuffer'
             })).data;
-            colormapLayer = await loadClientRasterColormapLayer({
+            colormapLayer = await this.$layerLoaders.loadClientRasterColormapLayer({
                 data: {
                     ...COD_META,
                     dataArr: [

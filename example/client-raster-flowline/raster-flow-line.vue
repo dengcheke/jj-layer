@@ -7,7 +7,6 @@
 <script>
 import {loadModules} from "esri-loader";
 import axios from "axios";
-import {loadClientRasterFlowLineLayer} from "@src";
 import TimePlayer from '../common/time-player'
 import {GUI} from 'three/examples/jsm/libs/lil-gui.module.min'
 
@@ -27,7 +26,7 @@ export default {
     async mounted() {
         const container = this.$el;
         const {map, view} = await this.initMap(container);
-        const layer = this.layer = await loadClientRasterFlowLineLayer({
+        const layer = this.layer = await this.$layerLoaders.loadClientRasterFlowLineLayer({
             id: this.layerId,
             effect: "bloom(1.5, 1px, 0.0)",
         });
