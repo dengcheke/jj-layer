@@ -180,8 +180,7 @@ export default {
             }
             this.curMin = min;
             this.curMax = max;
-            console.log(min, max)
-            return await this.$layerLoaders.loadDataSeriesTINMeshLayer({
+            return this.$layerLoaders.loadDataSeriesTINMeshLayer({
                 id: this.layerId,
                 tinMesh: {
                     vertex: vertexData,

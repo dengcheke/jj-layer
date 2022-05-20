@@ -466,8 +466,24 @@ define([
         });
     }
 
-    function createRasterFlowLineMesh({data, setting}) {
-        data.data = new Float32Array(data.data);
+    let id = 1;
+    const map = new Map();
+    function setCache(anyData){
+        const key = ++id;
+        map.set(key,anyData);
+        return key;
+    }
+    function removeCache(key){
+        map.delete(key);
+    }
+    function createRasterFlowLineMesh({data, setting, useCache}) {
+        let cacheId;
+        if(useCache){
+            data.data = map.get(data.data);
+        }else{
+            data.data = new Float32Array(data.data);
+            cacheId = setCache(data.data);
+        }
         const sampler = createSampler(data);
         const paths = buildRasterPaths(setting, sampler, data.width, data.height);
         const {buffer1, buffer2, buffer3} = toBuffer(paths);
@@ -476,6 +492,7 @@ define([
                 buffer1: buffer1.buffer,
                 buffer2: buffer2.buffer,
                 buffer3: buffer3.buffer,
+                cacheId: useCache ? null : cacheId
             },
             transferList: [
                 buffer1.buffer,
@@ -710,7 +727,9 @@ define([
     return {
         tessellateFlowLine,
         createRasterFlowLineMesh,
-        processTINMeshPart
+        processTINMeshPart,
+        setCache,
+        removeCache,
     }
 })
 

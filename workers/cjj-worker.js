@@ -199,6 +199,18 @@ class Vector2 {
 
 const RadToDeg = 180 / Math.PI;
 
+let id = 1;
+const map = new Map();
+export function setCache(anyData){
+    const key = ++id;
+    map.set(key,anyData);
+    return key;
+}
+export function removeCache(key){
+    map.delete(key);
+}
+
+
 function tessellateLineRound(geometry) {
     if (geometry.type.toLowerCase() !== 'polyline') throw new Error('geometry type is not polyline');
     return geometry.paths.map(_tessellatePath);
@@ -465,8 +477,14 @@ export function tessellateFlowLine(params) {
     });
 }
 
-export function createRasterFlowLineMesh({data, setting}) {
-    data.data = new Float32Array(data.data);
+export function createRasterFlowLineMesh({data, setting, useCache}) {
+    let cacheId;
+    if(useCache){
+        data.data = map.get(data.data);
+    }else{
+        data.data = new Float64Array(data.data);
+        cacheId = setCache(data.data);
+    }
     const sampler = createSampler(data);
     const paths = buildRasterPaths(setting, sampler, data.width, data.height);
     const {buffer1, buffer2, buffer3} = toBuffer(paths);
@@ -475,6 +493,7 @@ export function createRasterFlowLineMesh({data, setting}) {
             buffer1: buffer1.buffer,
             buffer2: buffer2.buffer,
             buffer3: buffer3.buffer,
+            cacheId: useCache ? null : cacheId
         },
         transferList: [
             buffer1.buffer,

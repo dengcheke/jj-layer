@@ -80,24 +80,58 @@ export function nextTick() {
     })
 }
 
-export function createVersionChecker(){
+export const VersionNotMatch = "version not match";
+
+function _promisify(param) {
+    if (param instanceof Function) param = param();
+    if (!(param instanceof Promise)) param = Promise.resolve(param);
+    return param;
+}
+
+export function createVersionChecker(tag) {
     let version = 0;
-    return promise => {
+    const invoke = method => {
         const __version = ++version;
-        return promise.then(result=>{
-            if(__version !== version){
-                throw new Error('version not match')
-            }else{
+        //console.log(tag, __version);
+        return _promisify(method).then(result => {
+            if (__version !== version) {
+                throw new Error(VersionNotMatch)
+            } else {
                 return result
             }
         })
     }
+    invoke.getVersion = () => version;
+    return invoke;
 }
 
-const canvas = document.createElement('canvas');
-const ctx = canvas.getContext('2d');
-canvas.height = 1;
-canvas.width = 128;
+export function joinChecker(...checkers) {
+    const getVersion = () => checkers.map(c => c.getVersion()).join(',');
+    const invoke = method => {
+        const invokeVersion = getVersion();
+        //console.log('join', invokeVersion);
+        return _promisify(method).then(result => {
+            const versionNow = getVersion();
+            if (versionNow !== invokeVersion) {
+                //console.log('discard join', invokeVersion)
+                throw new Error(VersionNotMatch)
+            } else {
+                //console.log('use join', invokeVersion)
+                return result
+            }
+        })
+    }
+    invoke.getVersion = getVersion;
+    return invoke;
+}
+
+const {canvas, ctx} = /*#__PURE__*/ (() => {
+    const canvas = document.createElement('canvas');
+    canvas.height = 1;
+    canvas.width = 128;
+    const ctx = canvas.getContext('2d');
+    return {canvas, ctx}
+})()
 
 export function genColorRamp(s, w, h) {
     canvas.height = parseInt(h) || 1;
@@ -136,4 +170,10 @@ export function getRenderTarget(version) {
         result.framebufferObject = result.framebuffer;
         return result;
     }
+}
+
+export async function sleep(t) {
+    return new Promise((res, rej) => {
+        setTimeout(() => res(), t);
+    })
 }

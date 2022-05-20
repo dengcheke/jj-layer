@@ -4,11 +4,15 @@ import {
     getOptimalUnpackAlign,
     getRenderTarget,
     isFloat32Array,
-    near2PowG, nextTick,
-    RGBA2Id
+    near2PowG,
+    nextTick,
+    RGBA2Id,
+    VersionNotMatch
 } from "@src/utils";
 import {
-    AlphaFormat, BufferGeometry, Color,
+    AlphaFormat,
+    BufferGeometry,
+    Color,
     CustomBlending,
     DataTexture,
     DoubleSide,
@@ -150,9 +154,9 @@ async function DataSeriesTINLayerBuilder() {
                     .then(result => {
                         this.updateGeometry(result);
                         this.requestRender();
-                    })
-                    .catch(e => {
-                    });//silent
+                    }).catch(e => {
+                    if (e.message !== VersionNotMatch) throw e;
+                });
             }
             this._handlers.push(layer.watch('tinMesh', geometryHandle));
 

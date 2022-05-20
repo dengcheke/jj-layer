@@ -1,4 +1,4 @@
-import {getRenderTarget} from "@src/utils";
+import {createVersionChecker, getRenderTarget, joinChecker, VersionNotMatch} from "@src/utils";
 import {debounce} from 'lodash'
 import {
     AdditiveBlending,
@@ -76,6 +76,8 @@ async function ClientRasterFlowLineLayerBuilder() {
 
             //for <= 4.18
             this.useBloom = false;
+
+            this.connect = null;
         },
 
         attach: function () {
@@ -108,6 +110,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             const mesh = this.lineMesh = new LineSegments2(new LineSegmentsGeometry(), material);
             this._handlers.push({
                 remove: () => {
+                    this.clearWorkerCache();
                     mesh.material.dispose();
                     mesh.geometry.dispose();
                     renderer.dispose();
@@ -213,10 +216,14 @@ async function ClientRasterFlowLineLayerBuilder() {
             //bind event
             const {layer} = this;
             const renderOpts = layer.renderOpts;
-            let dataVersion = 0, calcVersion = 0;
-            const getToken = () => {
-                return [dataVersion, calcVersion].join('_');
-            }
+
+            const check1 = createVersionChecker('数据源');
+            const check2 = createVersionChecker('其他');
+            const joinCheck = joinChecker(check1, check2);
+            const _catch = e => {
+                if (e.message !== VersionNotMatch) throw e
+            };
+
             const getSetting = () => {
                 const lineWidth = renderOpts.lineWidth || 1;
                 const {extent, width, height} = this.rasterData;
@@ -253,7 +260,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                     limitRange: [xmin, xmax, ymin, ymax]
                 }
             }
-            const updateData = () => {
+            const processData = () => {
                 const data = this.layer.data;
                 if (!data) return false;
                 const viewSR = this.view.spatialReference;
@@ -266,8 +273,8 @@ async function ClientRasterFlowLineLayerBuilder() {
                     width: data.cols,
                     height: data.rows,
                     extent: extent,
-                    version: dataVersion,
-                    noDataValue: data.noDataValue || undefined
+                    noDataValue: data.noDataValue || undefined,
+                    cacheId: null,
                 }
                 this.layer.fullExtent = extent;
                 return true;
@@ -277,7 +284,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 const res = await this.asyncCreateRasterFlowLineMesh({
                     data: this.rasterData,
                     setting: setting
-                })
+                });
                 /*const res = this.syncCreateRasterFlowLineMesh({
                     data: this.rasterData,
                     setting: setting
@@ -298,36 +305,33 @@ async function ClientRasterFlowLineLayerBuilder() {
                 return true;
             }
 
-            const reCalcBuffer = debounce(token => {
-                if (token !== getToken()) return;
+            const reCalcBuffer = debounce(() => {
                 const setting = getSetting();
                 if (!setting) return;
-                computeBufferData(setting).then(bufferData => {
-                    if (token !== getToken()) return;
-                    const updated = updateBufferData(bufferData);
-                    updated && this.requestRender();
-                });
+                joinCheck(computeBufferData(setting))
+                    .then(bufferData => {
+                        updateBufferData(bufferData) && this.requestRender();
+                    }).catch(_catch)
             }, 200, {leading: false, trailing: true})
 
-            const handleDataChange = () => {
+            const handleDataChange = async () => {
                 if (this.destroyed) return;
+                this.clearWorkerCache();
                 this.rasterData = null;
                 this.hasData = false;
                 this.layer.fullExtent = null;
-                dataVersion++;
-                calcVersion = 0;
-                const flag = updateData();
-                flag && reCalcBuffer(getToken());
+                check1(processData())
+                    .then(flag => {
+                        flag && reCalcBuffer();
+                    }).catch(_catch)
             }
-
-            const reCalcHandler = () => {
+            const handleNewCalc = () => {
                 if (this.destroyed || !this.rasterData) return;
-                calcVersion++;
-                reCalcBuffer(getToken());
+                check2().then(() => reCalcBuffer()).catch(_catch)
             }
 
-            this._handlers.push(this.view.watch('scale,extent', reCalcHandler));
-            this._handlers.push(renderOpts.watch('density,lineLength,velocityScale', reCalcHandler));
+            this._handlers.push(this.view.watch('scale,extent', handleNewCalc));
+            this._handlers.push(renderOpts.watch('density,lineLength,velocityScale', handleNewCalc));
             this._handlers.push(layer.watch("data", handleDataChange));
 
             const handleAppearChange = () => {
@@ -342,6 +346,8 @@ async function ClientRasterFlowLineLayerBuilder() {
 
         detach: function () {
             this._handlers.forEach(i => i.remove());
+            this.connect?.close();
+            this.connect = null;
             this._handlers = [];
         },
 
@@ -602,24 +608,44 @@ async function ClientRasterFlowLineLayerBuilder() {
                 return Math.max(min, Math.min(max, value));
             }
         },
-        async asyncCreateRasterFlowLineMesh({data, setting}) {
-            const {data: buffer, width, height, noDataValue} = data;
-            const pixels = new Float32Array(buffer);
-            const connect = await workers.open(WORKER_PATH);
-            const {buffer1, buffer2, buffer3} = await connect.invoke(
+
+        async getConnect() {
+            if (!this.connect) {
+                this.connect = await workers.open(WORKER_PATH, {strategy: 'dedicated'});
+            }
+            return this.connect;
+        },
+
+        async clearWorkerCache() {
+            const key = this.rasterData?.cacheId
+            if (key) {
+                const connect = await this.getConnect();
+                await connect.invoke('removeCache', key);
+            }
+        },
+
+        async asyncCreateRasterFlowLineMesh({data: rasterData, setting}) {
+            const connect = await this.getConnect();
+            const {data: buffer, width, height, noDataValue, cacheId} = rasterData;
+            const useCache = !!cacheId;
+            const pixels = cacheId || new Float64Array(buffer);
+            const {buffer1, buffer2, buffer3, cacheId: id} = await connect.invoke(
                 'createRasterFlowLineMesh',
                 {
                     data: {
-                        data: pixels.buffer,
+                        data: pixels,
                         width: width,
                         height: height,
                         noDataValue: noDataValue
                     },
-                    setting: setting
-                }, {
+                    setting: setting,
+                    useCache,
+                }, useCache ? undefined : {
                     transferList: [pixels.buffer]
                 });
-            connect.close();
+            if (!cacheId) {
+                rasterData.cacheId = id;
+            }
             return {
                 buffer1: new Float32Array(buffer1),
                 buffer2: new Float32Array(buffer2),
