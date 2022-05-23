@@ -4,9 +4,12 @@ const commonjs = require("@rollup/plugin-commonjs");
 const path = require('path');
 const url = require("@rollup/plugin-url");
 const dependencies = require('../package.json').dependencies
+const peerDependencies = require('../package.json').peerDependencies
 const rollup = require('rollup');
 const fs = require('fs');
 const srcPath = path.resolve(__dirname, "../src");
+
+const depKeys = [...Object.keys(dependencies),...Object.keys(peerDependencies)]
 
 async function build(file) {
     const bundle = await rollup.rollup({
@@ -63,7 +66,7 @@ async function build(file) {
         ],
         external: id => {
             // Rollup will only exclude modules that match strings exactly!
-            return !!Object.keys(dependencies).find(depend => id.includes(depend))
+            return !!depKeys.find(depend => id.includes(depend))
         }
     });
     const outputOpts = {

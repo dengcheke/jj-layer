@@ -125,6 +125,11 @@ export function joinChecker(...checkers) {
     return invoke;
 }
 
+export const versionErrCatch = e => {
+    if (e.message !== VersionNotMatch) throw e
+};
+
+
 const {canvas, ctx} = /*#__PURE__*/ (() => {
     const canvas = document.createElement('canvas');
     canvas.height = 1;

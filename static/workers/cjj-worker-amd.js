@@ -468,36 +468,58 @@ define([
 
     let id = 1;
     const map = new Map();
-    function setCache(anyData){
+
+    function setCache(anyData) {
         const key = ++id;
-        map.set(key,anyData);
+        map.set(key, anyData);
         return key;
     }
-    function removeCache(key){
+
+    function removeCache(key) {
         map.delete(key);
     }
-    function createRasterFlowLineMesh({data, setting, useCache}) {
+
+    function createRasterFlowLineMesh({data, setting, useCache, computeSpeedRange}) {
         let cacheId;
-        if(useCache){
+        if (useCache) {
             data.data = map.get(data.data);
-        }else{
+        } else {
             data.data = new Float32Array(data.data);
             cacheId = setCache(data.data);
         }
+
+        let speedRange
+        if (computeSpeedRange) {
+            const {data: arr, noDataValue} = data;
+            let min = Infinity, max = -Infinity;
+            for (let i = 0; i < arr.length; i += 2) {
+                const l = Math.hypot(
+                    arr[i] === noDataValue ? 0 : arr[i],
+                    arr[i + 1] === noDataValue ? 0 : arr[i + 1]
+                );
+                min = Math.min(min,l);
+                max = Math.max(max,l);
+            }
+            speedRange = [min,max]
+        }
+
         const sampler = createSampler(data);
         const paths = buildRasterPaths(setting, sampler, data.width, data.height);
-        const {buffer1, buffer2, buffer3} = toBuffer(paths);
+        const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths);
         return {
             result: {
                 buffer1: buffer1.buffer,
                 buffer2: buffer2.buffer,
                 buffer3: buffer3.buffer,
+                buffer4: buffer4.buffer,
+                speedRange,
                 cacheId: useCache ? null : cacheId
             },
             transferList: [
                 buffer1.buffer,
                 buffer2.buffer,
                 buffer3.buffer,
+                buffer4.buffer,
             ]
         }
 
@@ -510,6 +532,7 @@ define([
             const buffer1 = new Float32Array(n);
             const buffer2 = new Float32Array(n);
             const buffer3 = new Float32Array(n);
+            const buffer4 = new Float32Array(segmentCount * 2);
             let cursor = 0;
             for (let i = 0; i < paths.length; i++) {
                 const path = paths[i];
@@ -537,6 +560,9 @@ define([
                     buffer3[c1] = p2.t;
                     buffer3[c2] = totalTime;
                     buffer3[c3] = timeSeed;
+
+                    buffer4[cursor * 2] = p1.speed;
+                    buffer4[cursor * 2 + 1] = p2.speed;
                     cursor++;
                 }
             }
@@ -544,6 +570,7 @@ define([
                 buffer1,
                 buffer2,
                 buffer3,
+                buffer4,
             }
         }
 
@@ -593,10 +620,17 @@ define([
             const lastDir = new Vector2();
             const curDir = new Vector2();
             const _vec2 = new Vector2();
-            points.push({x: startX, y: startY, t: time});
+            points.push({
+                x: startX,
+                y: startY,
+                t: time,
+                speed: _vec2.set(...sampler(startX, startY)).length()
+            });
             for (let i = 0; i < setting.verticesPerLine; i++) {
                 if (i && !inRange(curPoint.x, curPoint.y)) break;
-                const uv = _vec2.set(...sampler(curPoint.x, curPoint.y)).multiplyScalar(setting.velocityScale);
+                const uv = _vec2.set(...sampler(curPoint.x, curPoint.y));
+                const originSpeed = uv.length();
+                uv.multiplyScalar(setting.velocityScale);
                 const speed = uv.length();
                 if (speed < setting.minSpeedThreshold) break;
                 curDir.copy(uv).multiplyScalar(1 / speed);
@@ -615,7 +649,8 @@ define([
                 points.push({
                     x: nextPoint.x,
                     y: nextPoint.y,
-                    t: time
+                    t: time,
+                    speed: originSpeed,
                 });
                 lastDir.copy(curDir);
                 curPoint.copy(nextPoint);

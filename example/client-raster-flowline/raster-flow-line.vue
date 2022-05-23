@@ -1,6 +1,7 @@
 <template>
     <div style="position: relative;width: 100%;height: 100%;overflow:hidden;">
         <div class="map-wrapper base"/>
+        <img :src="colorRamp" style="position:absolute;right: 400px;top: 100px;"/>
     </div>
 </template>
 
@@ -9,7 +10,12 @@ import {loadModules} from "esri-loader";
 import axios from "axios";
 import TimePlayer from '../common/time-player'
 import {GUI} from 'three/examples/jsm/libs/lil-gui.module.min'
+import {genColorRamp} from "@src/utils";
 
+const colorRamp = genColorRamp([
+    {color: "green", value: 0},
+    {color: "red", value: 1},
+], 128, 32)
 export default {
     name: "vf-layer",
     components: {TimePlayer},
@@ -21,6 +27,7 @@ export default {
             arrowSizeRange: [1, 40 / 2 ** 0.5],
             arrowSize: [16, 40 / 2 ** 0.5],
             showGrid: false,
+            colorRamp,
         }
     },
     async mounted() {
@@ -31,7 +38,6 @@ export default {
             effect: "bloom(1.5, 1px, 0.0)",
         });
         map.add(layer);
-
         const gui = new GUI();
         const switchData = {
             changeData: true
@@ -74,9 +80,10 @@ export default {
                 layer.data = data1;
                 view.center = [120, 20];
                 view.scale = 3611100.909643
-                flowParams.velocityScale = layer.renderOpts.velocityScale = 1
+                flowParams.velocityScale = layer.renderOpts.velocityScale = 1;
             } else {
                 layer.data = data2;
+                layer.renderOpts.valueRange = [0, 0.15]
                 view.center = {
                     type: 'point',
                     x: 12907021.08629284,
@@ -103,6 +110,7 @@ export default {
             lineSpeed: 5,
             lineWidth: 4,
             velocityScale: 1,
+            useColorRamp: false,
         }
         layer.renderOpts.lineColor = flowParams.lineColor;
 
@@ -141,6 +149,13 @@ export default {
             })
             folder.add(flowParams, 'velocityScale', 1, 100).step(0.1).onChange((v) => {
                 layer.renderOpts.velocityScale = v;
+            });
+            folder.add(flowParams, 'useColorRamp').onChange(v => {
+                if (v) {
+                    layer.renderOpts.colorStops = this.colorRamp;
+                } else {
+                    layer.renderOpts.colorStops = null;
+                }
             })
         }
         handleDataChange(true);
@@ -174,7 +189,7 @@ export default {
 }
 </script>
 
-<style scoped lang="less">
+<style lang="less" scoped>
 .map-wrapper.base {
     height: 100%;
     width: 100%;

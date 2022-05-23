@@ -45,7 +45,7 @@ const DEFAULT_COLOR_STOPS = [
     {value: 1, color: 'red'}
 ]
 
-function createNewGeometry() {
+function createNewGeometry(type) {
     const geo = new InstancedBufferGeometry();
     geo.setAttribute('position', new Float32BufferAttribute([
         1, 0, 0,
@@ -150,6 +150,7 @@ async function DataSeriesTINLayerBuilder() {
             //geometry
             const geometryHandle = () => {
                 this.geometryReady = false;
+                this._getTriangleByPickIndex = null;
                 vCheck(this.processTINMesh(this.layer.tinMesh))
                     .then(result => {
                         this.updateGeometry(result);
@@ -213,8 +214,7 @@ async function DataSeriesTINLayerBuilder() {
 
             //watch uniforms
             this._handlers.push(layer.watch('curTime', () => this.requestRender()));
-            this._handlers.push(renderOpts.watch('valueRange', () => this.requestRender()));
-            this._handlers.push(renderOpts.watch('showMesh', () => this.requestRender()));
+            this._handlers.push(renderOpts.watch('valueRange,showMesh', () => this.requestRender()));
             this._handlers.push(renderOpts.watch('meshColor', () => {
                 renderOpts.showMesh && this.requestRender();
             }));
@@ -484,10 +484,7 @@ async function DataSeriesTINLayerBuilder() {
             try {
                 const allTask = [];
                 for (let i = 0; i < tasks.length; i++) {
-                    //connect.invoke 会查找当前空闲线程, 在微队列中插入待执行任务(尚未执行,线程状态也未改变),
-                    //所以需要等待微队列中上一个任务的执行(刷新线程状态),
-                    //否则, 所有任务会推入到同一个线程中(线程状态未刷新, 查找空闲线程会命中同一个),
-                    await nextTick();
+                    await nextTick(); //await thread flush status, otherwise all task push to same usable thread
                     const {vertex, pickIndexOffset, idx} = tasks[i];
                     allTask.push(connect.invoke('processTINMeshPart', {
                         data: vertex.buffer,

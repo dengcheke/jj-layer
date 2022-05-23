@@ -4,7 +4,8 @@ import commonjs from "@rollup/plugin-commonjs";
 import path from 'path'
 import alias from "@rollup/plugin-alias";
 import url from "@rollup/plugin-url";
-import {dependencies} from '../package.json'
+import {dependencies,peerDependencies} from '../package.json'
+const depKeys = [...Object.keys(dependencies),...Object.keys(peerDependencies)]
 
 const srcPath = path.resolve(__dirname, "../src");
 
@@ -53,7 +54,7 @@ export default [
         },
         external: id => {
             // Rollup will only exclude modules that match strings exactly!
-            return !!Object.keys(dependencies).find(depend => id.includes(depend))
+            return !!depKeys.find(depend => id.includes(depend))
         }
     },
 ]

@@ -58,6 +58,8 @@ const layer = await loadFlowingLineLayer({
         lineLength: 200,
         lineSpeed: 5,
         lineWidth: 4,
+        colorStops: null, //optional, if set 'colorStops', 'lineColor' will be ignore, line colors are mapped to the 'colorStops' according to the 'speedRange'
+        speedRange: null, //optional, The value range of all data. You can also specify a range
     }, //optional
     data:{
         data: new Float32Array(buffer), // [u1,v1, u2,v2, u3,v3, ....],

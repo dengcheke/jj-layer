@@ -1,5 +1,5 @@
 /// <reference types="arcgis-js-api" />
-import {MultiTimeRasterDataInfo} from './common'
+import {ColorStops, MultiTimeRasterDataInfo} from './common'
 import * as Layer from "esri/layers/Layer";
 import * as Extent from "esri/geometry/Extent";
 
@@ -11,19 +11,23 @@ interface RasterFlowLineRenderOpts {
     lineSpeed?: number,
     lineWidth?: number,
     velocityScale?: number;
+    colorStops?: ColorStops;
+    speedRange?: [number, number];
     bloom?: {
         strength?: number,
         threshold?: number,
         radius?: number,
     } | null
 }
+
 type RasterFlowLineData = {
-    data:number[] | Float32Array | Float64Array,
-    extent:__esri.ExtentProperties | Extent,
-    cols:number,
-    rows:number,
-    noDataValue?:number
+    data: number[] | Float32Array | Float64Array,
+    extent: __esri.ExtentProperties | Extent,
+    cols: number,
+    rows: number,
+    noDataValue?: number
 }
+
 interface RasterFlowLineLayerProperties extends __esri.LayerProperties {
     data?: RasterFlowLineData,
     renderOpts?: RasterFlowLineRenderOpts

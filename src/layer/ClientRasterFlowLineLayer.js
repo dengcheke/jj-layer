@@ -1,4 +1,4 @@
-import {createVersionChecker, getRenderTarget, joinChecker, VersionNotMatch} from "@src/utils";
+import {createVersionChecker, genColorRamp, getRenderTarget, joinChecker, versionErrCatch} from "@src/utils";
 import {debounce} from 'lodash'
 import {
     AdditiveBlending,
@@ -10,6 +10,7 @@ import {
     OrthographicCamera,
     RawShaderMaterial,
     ShaderMaterial,
+    TextureLoader,
     UniformsUtils,
     Vector2,
     WebGLRenderer,
@@ -52,6 +53,8 @@ async function ClientRasterFlowLineLayerBuilder() {
             this.lineSpeed = 10;
             this.lineWidth = 4;
             this.velocityScale = 1;
+            this.colorStops = null;
+            this.speedRange = null;
         },
         properties: {
             density: {},
@@ -61,6 +64,8 @@ async function ClientRasterFlowLineLayerBuilder() {
             lineSpeed: {},
             lineWidth: {},
             velocityScale: {},
+            colorStops: {},
+            speedRange: {},
             bloom: {
                 set() {
                     console.warn('ClientRasterFlowLineLayer: renderOpts.bloom has been deprecated. Use layer.effect instead.')
@@ -76,6 +81,7 @@ async function ClientRasterFlowLineLayerBuilder() {
 
             //for <= 4.18
             this.useBloom = false;
+            this.useColorStops = false;
 
             this.connect = null;
         },
@@ -102,6 +108,8 @@ async function ClientRasterFlowLineLayerBuilder() {
                     u_lineSpeed: {value: 5},
                     u_lineColor: {value: new Color()},
                     u_lineWidth: {value: 4},
+                    u_colorRamp: {value: null},
+                    u_speedRange: {value: new Vector2()}
                 },
                 side: DoubleSide,
                 vertexShader: RasterFlowLineVertexShader,
@@ -220,9 +228,6 @@ async function ClientRasterFlowLineLayerBuilder() {
             const check1 = createVersionChecker('数据源');
             const check2 = createVersionChecker('其他');
             const joinCheck = joinChecker(check1, check2);
-            const _catch = e => {
-                if (e.message !== VersionNotMatch) throw e
-            };
 
             const getSetting = () => {
                 const lineWidth = renderOpts.lineWidth || 1;
@@ -291,7 +296,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 });*/
                 return res;
             }
-            const updateBufferData = ({buffer1, buffer2, buffer3}) => {
+            const updateBufferData = ({buffer1, buffer2, buffer3, buffer4}) => {
                 if (this.destroyed) return;
                 mesh.geometry.dispose();
                 mesh.geometry = new LineSegmentsGeometry()
@@ -300,7 +305,9 @@ async function ClientRasterFlowLineLayerBuilder() {
                     .setAttribute('instance_p2_p3',
                         new InstancedBufferAttribute(buffer2, 4))
                     .setAttribute('instance_timeInfo',
-                        new InstancedBufferAttribute(buffer3, 4));
+                        new InstancedBufferAttribute(buffer3, 4))
+                    .setAttribute('instance_speed12',
+                        new InstancedBufferAttribute(buffer4, 2));
                 this.hasData = !!buffer1.length;
                 return true;
             }
@@ -311,7 +318,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 joinCheck(computeBufferData(setting))
                     .then(bufferData => {
                         updateBufferData(bufferData) && this.requestRender();
-                    }).catch(_catch)
+                    }).catch(versionErrCatch)
             }, 200, {leading: false, trailing: true})
 
             const handleDataChange = async () => {
@@ -321,18 +328,42 @@ async function ClientRasterFlowLineLayerBuilder() {
                 this.hasData = false;
                 this.layer.fullExtent = null;
                 check1(processData())
-                    .then(flag => {
-                        flag && reCalcBuffer();
-                    }).catch(_catch)
+                    .then(flag => flag && reCalcBuffer())
+                    .catch(versionErrCatch)
             }
             const handleNewCalc = () => {
                 if (this.destroyed || !this.rasterData) return;
-                check2().then(() => reCalcBuffer()).catch(_catch)
+                check2().then(() => reCalcBuffer()).catch(versionErrCatch)
             }
 
-            this._handlers.push(this.view.watch('scale,extent', handleNewCalc));
-            this._handlers.push(renderOpts.watch('density,lineLength,velocityScale', handleNewCalc));
+            this._handlers.push(this.view.watch(['scale', 'extent'], handleNewCalc));
+            this._handlers.push(renderOpts.watch(['density', 'lineLength', 'velocityScale'], handleNewCalc));
             this._handlers.push(layer.watch("data", handleDataChange));
+
+            const check3 = createVersionChecker('colorRamp');
+            const handleColorStops = v => {
+                let oldUse = this.useColorStops;
+                if (!v) {
+                    this.useColorStops = false;
+                    if (oldUse !== this.useColorStops) material.needsUpdate = true;
+                } else {
+                    if (Array.isArray(v)) v = genColorRamp(v, 128, 1);
+                    check3(
+                        new Promise((resolve, reject) => new TextureLoader().load(v,
+                            newTexture => resolve(newTexture),
+                            null,
+                            () => reject(`load RasterFlowLineLayer colorStops img err, your img src is: "${v}"`)
+                        ))
+                    ).then(newTexture => {
+                        material.uniforms.u_colorRamp.value?.dispose();
+                        material.uniforms.u_colorRamp.value = newTexture;
+                        this.useColorStops = true;
+                        if (oldUse !== this.useColorStops) material.needsUpdate = true;
+                        this.requestRender();
+                    }).catch(versionErrCatch);
+                }
+            }
+            this._handlers.push(renderOpts.watch('colorStops', handleColorStops));
 
             const handleAppearChange = () => {
                 material.uniforms.u_lineSpeed.value = renderOpts.lineSpeed || 1;
@@ -341,7 +372,9 @@ async function ClientRasterFlowLineLayerBuilder() {
             }
             this._handlers.push(renderOpts.watch('fadeDuration,lineSpeed',
                 debounce(handleAppearChange, 200, {leading: false, trailing: true})));
+
             this.layer.data && handleDataChange();
+            renderOpts.colorStops && handleColorStops(renderOpts.colorStops);
         },
 
         detach: function () {
@@ -422,12 +455,34 @@ async function ClientRasterFlowLineLayerBuilder() {
                     _mat3.identity().translate(point.x, point.y)
                 )
             const opts = layer.renderOpts;
-            uniform.u_lineColor.value.set(opts.lineColor);
+
+            if (this.useColorStops) {
+                const speedRange = opts.speedRange || rasterData.speedRange;
+                lineMesh.material.defines.USE_COLOR_RAMP = "";
+                uniform.u_speedRange.value.set(speedRange[0], speedRange[1]);
+            } else {
+                uniform.u_lineColor.value.set(opts.lineColor);
+                delete lineMesh.material.defines.USE_COLOR_RAMP;
+            }
+
             uniform.u_lineWidth.value = opts.lineWidth || 1;
             uniform.u_time.value = performance.now() / 1000;
         },
 
         syncCreateRasterFlowLineMesh({data, setting}) {
+            if (!data.speedRange) {
+                const {data: arr, noDataValue} = data;
+                let min = Infinity, max = -Infinity;
+                for (let i = 0; i < arr.length; i += 2) {
+                    const l = Math.hypot(
+                        arr[i] === noDataValue ? 0 : arr[i],
+                        arr[i + 1] === noDataValue ? 0 : arr[i + 1]
+                    );
+                    min = Math.min(min, l);
+                    max = Math.max(max, l);
+                }
+                data.speedRange = [min, max]
+            }
             const sampler = createSampler(data);
             const paths = buildRasterPaths(setting, sampler, data.width, data.height);
             return toBuffer(paths)
@@ -441,6 +496,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 const buffer1 = new Float32Array(n);
                 const buffer2 = new Float32Array(n);
                 const buffer3 = new Float32Array(n);
+                const buffer4 = new Float32Array(segmentCount * 2);
                 let cursor = 0;
                 for (let i = 0; i < paths.length; i++) {
                     const path = paths[i];
@@ -468,6 +524,9 @@ async function ClientRasterFlowLineLayerBuilder() {
                         buffer3[c1] = p2.t;
                         buffer3[c2] = totalTime;
                         buffer3[c3] = timeSeed;
+
+                        buffer4[cursor * 2] = p1.speed;
+                        buffer4[cursor * 2 + 1] = p2.speed;
                         cursor++;
                     }
                 }
@@ -475,6 +534,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                     buffer1,
                     buffer2,
                     buffer3,
+                    buffer4
                 }
             }
 
@@ -517,17 +577,27 @@ async function ClientRasterFlowLineLayerBuilder() {
                 return result
             }
 
-            function buildPath(setting, sampler, startX, startY, stencil, stencilWidth, stencilHeight, scaleRatio, limitRange, inRange) {
+            function buildPath(setting, sampler,
+                               startX, startY,
+                               stencil, stencilWidth, stencilHeight,
+                               scaleRatio, limitRange, inRange) {
                 const points = [];
                 let time = 0;
                 const curPoint = new Vector2(startX, startY);
                 const lastDir = new Vector2();
                 const curDir = new Vector2();
                 const _vec2 = new Vector2();
-                points.push({x: startX, y: startY, t: time});
+                points.push({
+                    x: startX,
+                    y: startY,
+                    t: time,
+                    speed: _vec2.set(...sampler(startX, startY)).length()
+                });
                 for (let i = 0; i < setting.verticesPerLine; i++) {
                     if (i && !inRange(curPoint.x, curPoint.y)) break;
-                    const uv = _vec2.set(...sampler(curPoint.x, curPoint.y)).multiplyScalar(setting.velocityScale);
+                    const uv = _vec2.set(...sampler(curPoint.x, curPoint.y));
+                    const originSpeed = uv.length();
+                    uv.multiplyScalar(setting.velocityScale);
                     const speed = uv.length();
                     if (speed < setting.minSpeedThreshold) break;
                     curDir.copy(uv).multiplyScalar(1 / speed);
@@ -546,7 +616,8 @@ async function ClientRasterFlowLineLayerBuilder() {
                     points.push({
                         x: nextPoint.x,
                         y: nextPoint.y,
-                        t: time
+                        t: time,
+                        speed: originSpeed,
                     });
                     lastDir.copy(curDir);
                     curPoint.copy(nextPoint);
@@ -626,10 +697,15 @@ async function ClientRasterFlowLineLayerBuilder() {
 
         async asyncCreateRasterFlowLineMesh({data: rasterData, setting}) {
             const connect = await this.getConnect();
-            const {data: buffer, width, height, noDataValue, cacheId} = rasterData;
+            const {data: buffer, width, height, noDataValue, cacheId, speedRange} = rasterData;
             const useCache = !!cacheId;
             const pixels = cacheId || new Float64Array(buffer);
-            const {buffer1, buffer2, buffer3, cacheId: id} = await connect.invoke(
+            const computeSpeedRange = !speedRange;
+            const {
+                buffer1, buffer2, buffer3, buffer4,
+                speedRange: range,
+                cacheId: id
+            } = await connect.invoke(
                 'createRasterFlowLineMesh',
                 {
                     data: {
@@ -640,16 +716,17 @@ async function ClientRasterFlowLineLayerBuilder() {
                     },
                     setting: setting,
                     useCache,
+                    computeSpeedRange,
                 }, useCache ? undefined : {
                     transferList: [pixels.buffer]
                 });
-            if (!cacheId) {
-                rasterData.cacheId = id;
-            }
+            if (!cacheId) rasterData.cacheId = id;
+            if (computeSpeedRange) rasterData.speedRange = range;
             return {
                 buffer1: new Float32Array(buffer1),
                 buffer2: new Float32Array(buffer2),
                 buffer3: new Float32Array(buffer3),
+                buffer4: new Float32Array(buffer4),
             }
         }
     });

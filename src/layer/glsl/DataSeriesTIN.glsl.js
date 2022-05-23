@@ -85,20 +85,3 @@ export const DataSeriesTINFragShader = `
         }
     }
 `
-
-/*
-if(!u_isPick){
-    vec2 onePixel = 1.0 / u_texSize;
-    vec2 halfOnePixel = onePixel / 2.0;
-    vec2 uv = v_col_row * onePixel + halfOnePixel;
-    float v1 = texture2D(u_beforeTex, uv).a;
-    float v2 = texture2D(u_afterTex, uv).a;
-    float v = mix(v1, v2, u_percent);
-    float MIN = u_valueRange[0];
-    float MAX = u_valueRange[1];
-    MAX = MIN == MAX ? MIN + 1.0 : MAX;
-    v = (v - MIN) / (MAX - MIN);
-    gl_FragColor = texture2D(u_colorRamp, vec2(v, 0.5));
-}else{
-    gl_FragColor = v_pick_color;
-}*/

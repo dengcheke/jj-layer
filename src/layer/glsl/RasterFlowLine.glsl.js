@@ -18,6 +18,11 @@ varying float v_time;
 varying float v_totalTime;
 varying float v_timeSeed;
 
+#ifdef USE_COLOR_RAMP
+    attribute vec2 instance_speed12;
+    varying float v_speed;
+#endif
+
 bool samePoint(vec2 a, vec2 b){
     return a.x == b.x && a.y == b.y;
 }
@@ -36,7 +41,7 @@ void main(void) {
     bool isStart = position.y < 0.5;
     vec2 screenPos = isStart ? p0 : p1;
     
-    vec2 dir = p2 - p1; //屏幕dir
+    vec2 dir = p2 - p1; //dir in screen
     dir = normalize(dir);
     
     //calc bevel offset
@@ -67,6 +72,9 @@ void main(void) {
     v_time = isStart ? instance_timeInfo.x : instance_timeInfo.y;
     v_totalTime = instance_timeInfo.z;
     v_timeSeed = instance_timeInfo.w;
+    #ifdef USE_COLOR_RAMP
+        v_speed = isStart ? instance_speed12.x : instance_speed12.y;
+    #endif
 }`
 export const RasterFlowLineFragShader = `
 precision highp float;
@@ -78,12 +86,27 @@ varying float v_timeSeed;
 uniform float u_time;
 uniform float u_fadeDuration;
 uniform float u_lineSpeed;
-uniform vec3 u_lineColor;
 uniform float u_lineWidth;
+
+#ifdef USE_COLOR_RAMP
+    varying float v_speed;
+    uniform vec2 u_speedRange;
+    uniform sampler2D u_colorRamp;
+#else
+    uniform vec3 u_lineColor;
+#endif
 
 void main(void) {
     float halfWidth = u_lineWidth * 0.5;
-    vec4 color = vec4(u_lineColor, 1);
+    
+    #ifdef USE_COLOR_RAMP
+       float r = (v_speed - u_speedRange.x) / (u_speedRange.y - u_speedRange.x);
+       vec4 color = texture2D(u_colorRamp, vec2(clamp(r,0.0,1.0), 0.5));
+       color.a = 1.0;
+    #else
+       vec4 color = vec4(u_lineColor, 1);
+    #endif
+    
     float edgeWidth = min(2.0 * halfWidth - 1.0, 1.0);
     float edgeStart = (halfWidth - edgeWidth) / halfWidth;
     if (edgeStart < 0.95) {
@@ -96,3 +119,4 @@ void main(void) {
     gl_FragColor = color;
 }
 `
+
