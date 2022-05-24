@@ -118,7 +118,6 @@ async function ClientRasterFlowLineLayerBuilder() {
             const mesh = this.lineMesh = new LineSegments2(new LineSegmentsGeometry(), material);
             this._handlers.push({
                 remove: () => {
-                    this.clearWorkerCache();
                     mesh.material.dispose();
                     mesh.geometry.dispose();
                     renderer.dispose();
@@ -379,8 +378,10 @@ async function ClientRasterFlowLineLayerBuilder() {
 
         detach: function () {
             this._handlers.forEach(i => i.remove());
-            this.connect?.close();
-            this.connect = null;
+            this.connect && this.clearWorkerCache().finally(()=>{
+                this.connect?.close();
+                this.connect = null;
+            })
             this._handlers = [];
         },
 
