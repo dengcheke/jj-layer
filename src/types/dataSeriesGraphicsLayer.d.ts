@@ -11,13 +11,15 @@ interface DataSeriesRenderOpts {
 interface DataSeriesGraphicsLayerProperties extends __esri.GraphicsLayerProperties {
     renderOpts?: DataSeriesRenderOpts,
     curTime?: number,
-    data?: TimeSeriesBufferArray
+    data?: TimeSeriesBufferArray,
+    indexKey?: null | string | Function
 }
 
 interface DataSeriesGraphicsLayer extends GraphicsLayer {
     renderOpts: DataSeriesRenderOpts,
     curTime: number,
     data: TimeSeriesBufferArray,
+    indexKey: null | string | Function,
     getDataByIndex(graphic_valIndex:number): Array<[number, number]>
 }
 

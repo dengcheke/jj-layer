@@ -12,9 +12,11 @@ export const DataSeriesGraphicVertexShader = `
     attribute float a_upright;
     attribute vec4 a_pickColor;
     attribute float a_dataIndex;
+    attribute float a_visible;
     
     varying vec2 v_col_row;
     varying vec4 v_pick_color;
+    varying float v_visible;
     void main() {
         vec2 position = (a_position.xy - u_center.xy) + (a_position.zw - u_center.zw);
         vec2 offset = a_offset * u_offsetScale;
@@ -27,6 +29,7 @@ export const DataSeriesGraphicVertexShader = `
         
         v_col_row = vec2(col, row);
         v_pick_color = a_pickColor;   
+        v_visible = a_visible;
     }
 `
 
@@ -43,7 +46,9 @@ export const DataSeriesGraphicFragShader = `
     
     varying vec2 v_col_row;
     varying vec4 v_pick_color;
+    varying float v_visible;
     void main() {
+        if(v_visible == 0.0) discard;
         if(!u_isPick){
             vec2 onePixel = 1.0 / u_texSize;
             vec2 halfOnePixel = onePixel / 2.0;

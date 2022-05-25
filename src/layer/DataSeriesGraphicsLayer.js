@@ -1,19 +1,21 @@
 import {
+    calcDataTexSize,
+    convertDataTextureBuffer,
+    createVersionChecker,
     doubleToTwoFloats,
     genColorRamp,
+    getOptimalUnpackAlign,
     getRenderTarget,
     id2RGBA,
-    near2PowG,
-    RGBA2Id
+    RGBA2Id,
+    versionErrCatch
 } from "@src/utils";
 import {
-    AlphaFormat,
     BufferGeometry,
     CustomBlending,
     DataTexture,
     DoubleSide,
     Float32BufferAttribute,
-    FloatType,
     Matrix3,
     Mesh,
     NoBlending,
@@ -31,6 +33,7 @@ import {
 import {DataSeriesGraphicFragShader, DataSeriesGraphicVertexShader} from "@src/layer/glsl/DataSeries.glsl";
 import {buildModule} from "@src/builder";
 import {loadModules} from "esri-loader";
+import {_checkTimeTexNeedUpdate, _updateTimeTex} from "@src/layer/commom";
 
 const _mat3 = new Matrix3()
 const DEFAULT_COLOR_STOPS = [
@@ -39,7 +42,8 @@ const DEFAULT_COLOR_STOPS = [
 ]
 const Flags = Object.freeze({
     data: 'data',
-    appear: 'appear'
+    appear: 'appear',
+    indexKey: 'indexKey'
 })
 
 async function DataSeriesGraphicsLayerBuilder() {
@@ -54,13 +58,16 @@ async function DataSeriesGraphicsLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
+    await projection.load();
     const ARCGIS_VERSION = parseFloat(kernel.version);
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
             this._handlers = [];
             this.dataset = null;
+            this.indexKey = null;
+            this.colorRampReady = false;
 
-
+            this.meshes = null;
             this.updateFlags = new Set();
 
             this.texSize = null;
@@ -68,12 +75,10 @@ async function DataSeriesGraphicsLayerBuilder() {
             this.afterTime = null;
             this.percent = 0;
 
-            this.swap = false;
+            this.timeTexStrategy = null;
+            this.forceUpdateTimeTex = false;
             this.needUpdateTimeTex = false;
-
-            this.version = 0;
         },
-
         attach: function () {
             const self = this;
             this.renderer = new WebGLRenderer({
@@ -84,7 +89,6 @@ async function DataSeriesGraphicsLayerBuilder() {
             this.camera = new OrthographicCamera();
             this.camera.position.set(0, 0, 1000);
             this.camera.updateProjectionMatrix();
-            const loader = new TextureLoader();
             const material = new RawShaderMaterial({
                 blending: CustomBlending,
                 blendSrc: SrcAlphaFactor,
@@ -105,9 +109,10 @@ async function DataSeriesGraphicsLayerBuilder() {
                 },
                 side: DoubleSide,
                 vertexShader: DataSeriesGraphicVertexShader,
-                fragmentShader: DataSeriesGraphicFragShader
+                fragmentShader: DataSeriesGraphicFragShader,
             });
             this.meshObj = new Mesh(new BufferGeometry(), material);
+            this.meshObj.frustumCulled = false;
             const pickRT = new WebGLRenderTarget(1, 1);
             const pixelBuffer = new Uint8Array(4);
             this.pickObj = {pickRT, pixelBuffer}
@@ -116,44 +121,80 @@ async function DataSeriesGraphicsLayerBuilder() {
                     visibleWatcher?.remove();
                     this.meshObj.geometry.dispose();
                     material.uniforms.u_colorRamp.value?.dispose();
-                    material.uniforms.u_beforeTex.value.dispose();
-                    material.uniforms.u_afterTex.value.dispose();
+                    material.uniforms.u_beforeTex.value?.dispose();
+                    material.uniforms.u_afterTex.value?.dispose();
+                    pickRT.dispose();
+                    this.pickObj = null;
                     this.meshObj = null;
                 }
             });
 
             const layer = this.layer;
             const renderOpts = layer.renderOpts;
+
             let visibleWatcher = null;
+            const check1 = createVersionChecker('graphics');
+            const meshCache = new WeakMap();
+            const projGeoCache = new WeakMap();
+            const _updateIndexKey = () => {
+                const v = layer.indexKey;
+                this.indexKey = (() => {
+                    if (!v) return null;
+                    if (v instanceof Function) return v;
+                    if (typeof v === 'string') return g => g?.attributes?.[v];
+                    throw new Error('invalid dataSeriesLayer indexKey,')
+                })()
+            }
+            const _updateMeshIndex = () => {
+                if (this.meshes) {
+                    const indexKey = this.indexKey;
+                    this.meshes.forEach(meshItem => {
+                        meshItem.index = indexKey ? indexKey(meshItem.graphic) : meshItem.pickIdx - 1;
+                        meshItem.graphic._valIndex = meshItem.index;
+                    })
+                    this.updateFlags.add(Flags.indexKey);
+                    this.requestRender();
+                }
+            }
             const handleGraphicChanged = async () => {
                 if (this.destroyed) return;
-                {
-                    this.layer.fullExtent = null;
-                    visibleWatcher?.remove();
-                    visibleWatcher = null;
-                    this.meshes = null;
-                }
-                const __version = ++this.version;
-                const viewSR = this.view.spatialReference;
-                let fullExtent = null;
                 const graphics = this.layer.graphics;
-                const indexKey = renderOpts.indexKey;
-                const task = graphics.map(async (g, idx) => {
-                    const index = indexKey ? g.attributes?.[indexKey] : idx;
-                    if (g.geometry.cache.mesh) {
-                        g._valIndex = index;
+                const viewSR = this.view.spatialReference;
+                this.layer.fullExtent = null;
+                this.meshes = null;
+                this.updateFlags.clear();
+                visibleWatcher?.remove();
+                visibleWatcher = null;
+
+                if (!graphics.length) {
+                    this.requestRender();
+                    return;
+                }
+                return check1(async () => {
+                    let fullExtent = null;
+                    const task = graphics.map(async (g, idx) => {
+                        if (!meshCache.has(g.geometry)) {
+                            let geo = await geometryEngineAsync.simplify(g.geometry);
+                            if (!viewSR.equals(geo.spatialReference)) {
+                                geo = projection.project(geo, viewSR);
+                            }
+                            projGeoCache.set(g.geometry, geo);
+                            const mesh = await this.processGraphic(geo, g.attributes || {});
+                            meshCache.set(g.geometry, mesh)
+                        }
+                        const mesh = meshCache.get(g.geometry)
+                        const projGeo = projGeoCache.get(g.geometry);
+                        unionExtent(projGeo);
                         return {
-                            mesh: g.geometry.cache.mesh,
+                            mesh,
                             graphic: g,
-                            index: index,
-                            pickIdx: idx + 1,//0表示没有选中
+                            pickIdx: idx + 1,
                         }
-                    } else {
-                        let geo = await geometryEngineAsync.simplify(g.geometry);
-                        if (!viewSR.equals(geo.spatialReference)) {
-                            await projection.load();
-                            geo = projection.project(geo, viewSR);
-                        }
+                    })
+                    const meshes = await Promise.all(task._items);
+                    return {meshes, fullExtent}
+
+                    function unionExtent(geo) {
                         let extent;
                         if (geo.type === 'point') {
                             extent = new Extent({
@@ -171,135 +212,117 @@ async function DataSeriesGraphicsLayerBuilder() {
                         } else {
                             fullExtent.union(extent);
                         }
-                        const mesh = await this.processGraphic(geo, g.attributes || {});
-                        g.geometry.cache.mesh = mesh;
-                        g._valIndex = index;
-                        return {
-                            mesh: mesh,
-                            graphic: g,
-                            index: index,
-                            pickIdx: idx + 1,
+                    }
+                }).then(({meshes, fullExtent}) => {
+                    this.meshes = meshes;
+                    _updateMeshIndex();
+                    meshes.vertexCount = this.meshes.reduce(function (vertexCount, item) {
+                        return vertexCount + item.mesh.vertices.length;
+                    }, 0);
+                    meshes.indexCount = this.meshes.reduce(function (indexCount, item) {
+                        return indexCount + item.mesh.indices.length;
+                    }, 0);
+                    this.layer.fullExtent = fullExtent;
+                    visibleWatcher = createVisibleWatcher(graphics);
+                    this.updateFlags.add(Flags.data);
+                    this.requestRender();
+                }).catch(versionErrCatch);
+
+                function createVisibleWatcher(graphics) {
+                    const offs = graphics.map(g => g.watch('visible', () => {
+                        self.updateFlags.add(Flags.appear);
+                        self.requestRender();
+                    }))
+                    return {
+                        remove: () => {
+                            offs.forEach(h => h.remove())
                         }
                     }
-                })
-                const meshes = await Promise.all(task._items);
-
-                if (this.destroyed) return;
-                if (__version !== this.version) return;
-                this.meshes = meshes;
-                meshes.version = __version;
-                meshes.vertexCount = this.meshes.reduce(function (vertexCount, item) {
-                    return vertexCount + item.mesh.vertices.length;
-                }, 0);
-                meshes.indexCount = this.meshes.reduce(function (indexCount, item) {
-                    return indexCount + item.mesh.indices.length;
-                }, 0);
-                this.layer.fullExtent = fullExtent;
-                visibleWatcher = createVisibleWatcher(graphics);
-                this.updateFlags.add(Flags.data);
-                this.requestRender();
+                }
             };
+            this._handlers.push(layer.watch('indexKey', () => {
+                _updateIndexKey();
+                _updateMeshIndex();
+            }))
+            this._handlers.push(watchUtils.on(this, "layer.graphics", "change", handleGraphicChanged, handleGraphicChanged));
+
+
             const dataHandle = () => {
                 if (this.destroyed) return;
                 const data = layer.data;
                 data.sort((a, b) => +a[0] - +b[0]);
                 const times = data.map(item => +item[0]);
                 const dataLen = data[0][1].length;
-                const texSize = this.calcTexSize(dataLen);
+                const texSize = calcDataTexSize(dataLen);
                 const totalLen = texSize[0] * texSize[1];
-                const pixels = data.map(item => {
-                    return alignData(item[1], totalLen);
-                });
-                const unpackAlign = texSize[0] % 8 === 0
-                    ? 8
-                    : (texSize[0] % 4 === 0
-                            ? 4
-                            : (texSize[0] % 2 === 0
-                                    ? 2
-                                    : 1
-                            )
-                    );
+                const pixels = data.map(item => convertDataTextureBuffer(item[1], totalLen));
                 this.dataset = {
                     times: times,
                     pixels: pixels,
                     minTime: times[0],
                     maxTime: times[times.length - 1],
                     texSize,
-                    unpackAlignment: unpackAlign,
+                    unpackAlignment: getOptimalUnpackAlign(texSize[0]),
                     flipY: false,
                     getDataByTime(t) {
                         return pixels[times.indexOf(t)];
                     }
                 }
-                this.needUpdateTimeTex = true;
+                this.forceUpdateTimeTex = true;
                 this.requestRender();
-
-                function alignData(data, totalLen) {
-                    let arr = new Float32Array(totalLen);
-                    for (let i = 0; i < data.length; i++) arr[i] = data[i];
-                    return arr;
-                }
             }
-            this._handlers.push(watchUtils.on(this, "layer.graphics", "change", handleGraphicChanged, handleGraphicChanged));
-            this._handlers.push(layer.watch('curTime', () => {
-                this.needUpdateTimeTex = true;
-                this.requestRender();
-            }));
             this._handlers.push(layer.watch('data', dataHandle));
-            this._handlers.push(renderOpts.watch('valueRange', () => {
-                this.requestRender();
-            }));
+
+            this._handlers.push(renderOpts.watch('valueRange', () => this.requestRender()));
+            this._handlers.push(layer.watch('curTime', () => this.requestRender()));
+
+            const check2 = createVersionChecker('colorRamp');
             const colorStopsHandle = () => {
                 let v = renderOpts.colorStops;
-                if (!v) {
-                    console.warn('colorStops is empty')
-                    return
-                }
-                if (Array.isArray(v)) {
-                    v = genColorRamp(v, 128, 1);
-                }
-                loader.load(v, (newTexture) => {
+                if (!v) throw new Error('dataSeriesGraphics renderOpts.colorStops can not be empty')
+                if (Array.isArray(v)) v = genColorRamp(v, 128, 1);
+                this.colorRampReady = false;
+                check2(
+                    new Promise((resolve, reject) => {
+                        new TextureLoader().load(
+                            v,
+                            newTexture => resolve(newTexture),
+                            null,
+                            () => reject(`load RasterFlowLineLayer colorStops img err, your img src is: "${v}"`)
+                        )
+                    })
+                ).then((newTexture) => {
                     material.uniforms.u_colorRamp.value?.dispose();
                     material.uniforms.u_colorRamp.value = newTexture;
-                    newTexture.isReady = true;
+                    this.colorRampReady = true;
                     this.requestRender();
-                })
+                }).catch(versionErrCatch)
             }
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
 
+            layer.indexKey && _updateIndexKey()
             layer.data && dataHandle();
             renderOpts.colorStops && colorStopsHandle();
-
-            function createVisibleWatcher(graphics) {
-                const offs = graphics.map(g => g.watch('visible', () => {
-                    self.updateFlags.add(Flags.appear);
-                    self.requestRender();
-                }))
-                return {
-                    remove: () => {
-                        offs.forEach(h => h.remove())
-                    }
-                }
-            }
         },
 
         detach: function () {
-            this.version++;
             this._handlers.forEach(i => i.remove());
             this._handlers = [];
         },
 
-        render: function (renderParameters) {
+        render: function ({state}) {
             if (this.destroyed) return;
-            const state = renderParameters.state;
-            if (!this.layer.visible
-                || !this.layer.renderOpts.valueRange
-                || !this.dataset
-                || !this.layer.graphics.length
-                || !this.layer.fullExtent
-                || !state.extent.intersects(this.layer.fullExtent)
+            const {layer, dataset, meshes, colorRampReady} = this;
+            const {renderOpts} = layer;
+            if (!layer.visible
+                || !renderOpts.valueRange
+                || (isNaN(layer.curTime) || layer.curTime === null)
+                || !dataset
+                || !meshes?.length
+                || !colorRampReady
+                || !layer.fullExtent
+                || !state.extent.intersects(layer.fullExtent)
             ) return;
-            if (!this.meshObj?.material.uniforms.u_colorRamp.value?.isReady) return;
 
             const hasShow = this.layer.graphics.find(g => g.visible);
             if (!hasShow) return;
@@ -359,112 +382,25 @@ async function DataSeriesGraphicsLayerBuilder() {
             uniform.u_isPick.value = false;
             uniform.u_percent.value = this.percent;
             const renderOpts = layer.renderOpts;
-            uniform.u_valueRange.value.set(
-                renderOpts.valueRange[0],
-                renderOpts.valueRange[1]
-            );
-            const {flipY, texSize} = this.dataset;
+            uniform.u_valueRange.value.set(renderOpts.valueRange[0], renderOpts.valueRange[1]);
+            const {texSize} = this.dataset;
             uniform.u_texSize.value.set(texSize[0], texSize[1]);
+
             if (this.needUpdateTimeTex) {
-                const {beforeTime, afterTime} = this;
-                let beforeTex = uniform.u_beforeTex.value;
-                let afterTex = uniform.u_afterTex.value;
-                [beforeTex, afterTex].forEach(tex => {
-                    tex.format = AlphaFormat;
-                    tex.type = FloatType;
-                    tex.flipY = flipY;
-                    tex.unpackAlignment = this.dataset.unpackAlignment
-                })
-                if (this.swap) {
-                    [beforeTex, afterTex] = [afterTex, beforeTex];
-                    uniform.u_beforeTex.value = beforeTex;
-                    uniform.u_afterTex.value = afterTex;
-                    afterTex.image = {
-                        data: this.dataset.getDataByTime(afterTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    }
-                    afterTex.needsUpdate = true;
-                } else {
-                    beforeTex.image = {
-                        data: this.dataset.getDataByTime(beforeTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    };
-                    afterTex.image = {
-                        data: this.dataset.getDataByTime(afterTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    };
-                    beforeTex.needsUpdate = true;
-                    afterTex.needsUpdate = true;
-                }
-                this.swap = false;
-                this.needUpdateTimeTex = false
+                _updateTimeTex.call(this, uniform);
             }
         },
         checkTimeTexNeedUpdate() {
-            const {layer, dataset} = this,
-                {times} = dataset,
-                curTime = layer.curTime,
-                oldBefore = this.beforeTime,
-                oldAfter = this.afterTime;
-            const {maxTime, minTime} = dataset;
-            if (times.length > 1
-                && oldBefore !== null
-                && oldAfter !== null
-                && curTime >= oldBefore
-                && curTime <= oldAfter
-            ) {
-                this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime)
-                return;
-            }
-            if (times.length === 1 || curTime < minTime) {
-                this.beforeTime = this.afterTime = times[0] || 0;
-                this.percent = 0;
-            } else {
-                if (curTime >= maxTime) {
-                    this.afterTime = maxTime;
-                    this.beforeTime = times[times.length - 2];
-                    this.percent = 1;
-                } else {
-                    for (let i = 1; i < times.length; i++) {
-                        if (curTime < times[i]) {
-                            this.afterTime = times[i];
-                            this.beforeTime = times[i - 1];
-                            if (this.afterTime === this.beforeTime) {
-                                this.percent = 0;
-                            } else {
-                                this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime) || 0
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            if (oldBefore !== this.beforeTime || oldAfter !== this.afterTime) {
-                this.needUpdateTimeTex = true;
-                this.swap = oldAfter === this.beforeTime;
-            }
-        },
-        calcTexSize: function (len) {
-            if (!len) {
-                return null;
-            } else {
-                const length = near2PowG(len);
-                const l = Math.log2(length);
-                const cols = Math.ceil(l / 2);
-                const rows = l - cols;
-                return [2 ** cols, 2 ** rows];
-            }
+            _checkTimeTexNeedUpdate.call(this)
         },
         updateBufferData: function () {
             if (this.destroyed || !this.updateFlags.size) return;
-            if (this.meshes?.version !== this.version) return;
             const {meshObj, meshes} = this;
             const {vertexCount, indexCount} = meshes;
+            if (!meshes || !vertexCount) return;
 
             const dataChange = this.updateFlags.has(Flags.data),
+                indexKeyChange = dataChange || this.updateFlags.has(Flags.indexKey),
                 appearChange = dataChange || this.updateFlags.has(Flags.appear);
 
             if (dataChange) {
@@ -493,58 +429,63 @@ async function DataSeriesGraphicsLayerBuilder() {
             const visibleBuf = geometry.getAttribute('a_visible').array;
             const pickColorBuf = geometry.getAttribute('a_pickColor').array;
 
-            const indexData = new Array(indexCount);
+            //this is vertex index, not data index
+            const indexData = dataChange ? new Array(indexCount) : null;
 
             let currentVertex = 0;
             let currentIndex = 0;
 
-            for (let meshIndex = 0; meshIndex < this.meshes.length; ++meshIndex) {
+            for (let meshIndex = 0; meshIndex < meshes.length; ++meshIndex) {
                 const item = this.meshes[meshIndex];
                 const {mesh, graphic, index} = item;
 
-                const pickColor = id2RGBA(item.pickIdx);
+                const pickColor = dataChange ? id2RGBA(item.pickIdx) : null;
                 const visible = graphic.visible ? 1 : 0;
                 const upright = graphic.attributes?.upright ? 1 : 0;
-                for (let i = 0; i < mesh.indices.length; ++i) {
-                    let idx = mesh.indices[i];
-                    indexData[currentIndex] = currentVertex + idx;
-                    currentIndex++;
+
+                if (dataChange) {
+                    for (let i = 0; i < mesh.indices.length; ++i) {
+                        let idx = mesh.indices[i];
+                        indexData[currentIndex] = currentVertex + idx;
+                        currentIndex++;
+                    }
                 }
 
                 for (let i = 0; i < mesh.vertices.length; ++i) {
                     if (dataChange) {
+                        const c2 = currentVertex * 2, c4 = currentVertex * 4;
                         const v = mesh.vertices[i], {x, y} = v;
                         const [hx, lx] = doubleToTwoFloats(x);
                         const [hy, ly] = doubleToTwoFloats(y);
-                        posBuf[currentVertex * 4] = hx;
-                        posBuf[currentVertex * 4 + 1] = hy;
-                        posBuf[currentVertex * 4 + 2] = lx;
-                        posBuf[currentVertex * 4 + 3] = ly;
+                        posBuf[c4] = hx;
+                        posBuf[c4 + 1] = hy;
+                        posBuf[c4 + 2] = lx;
+                        posBuf[c4 + 3] = ly;
 
-                        offsetBuf[currentVertex * 2] = v.xOffset;
-                        offsetBuf[currentVertex * 2 + 1] = v.yOffset;
+                        offsetBuf[c2] = v.xOffset;
+                        offsetBuf[c2 + 1] = v.yOffset;
 
                         uprightBuf[currentVertex] = upright;
 
-                        indexBuf[currentVertex] = index;
-
-                        pickColorBuf[currentVertex * 4] = pickColor[0];
-                        pickColorBuf[currentVertex * 4 + 1] = pickColor[1];
-                        pickColorBuf[currentVertex * 4 + 2] = pickColor[2];
-                        pickColorBuf[currentVertex * 4 + 3] = pickColor[3];
+                        pickColorBuf[c4] = pickColor[0];
+                        pickColorBuf[c4 + 1] = pickColor[1];
+                        pickColorBuf[c4 + 2] = pickColor[2];
+                        pickColorBuf[c4 + 3] = pickColor[3];
 
                     }
-                    if (appearChange) {
-                        visibleBuf[currentVertex] = visible;
-                    }
-
+                    if(indexKeyChange) indexBuf[currentVertex] = index;
+                    if(appearChange) visibleBuf[currentVertex] = visible;
                     currentVertex++;
                 }
             }
+
             if (dataChange) {
                 for (let attr in geometry.attributes) {
                     geometry.getAttribute(attr).needsUpdate = true;
                 }
+            }
+            if (indexKeyChange) {
+                geometry.getAttribute('a_dataIndex').needsUpdate = true;
             }
             if (appearChange) {
                 geometry.getAttribute('a_visible').needsUpdate = true;
@@ -664,18 +605,17 @@ async function DataSeriesGraphicsLayerBuilder() {
         constructor: function () {
             this.valueRange = null;
             this.colorStops = DEFAULT_COLOR_STOPS;
-            this.indexKey = null;
         },
         properties: {
             valueRange: {},
             colorStops: {},
-            indexKey: {}
         },
     });
     return GraphicsLayer.createSubclass({
         constructor: function () {
             this.curTime = null;
             this.data = null;
+            this.indexKey = null;
             Object.defineProperties(this, {
                 _renderOpts: {
                     enumerable: false,
@@ -688,6 +628,7 @@ async function DataSeriesGraphicsLayerBuilder() {
         properties: {
             curTime: {},
             data: {},
+            indexKey: {},
             renderOpts: {
                 get() {
                     return this._renderOpts

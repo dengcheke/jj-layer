@@ -19,6 +19,30 @@ export function isFloat32Array(arr) {
     return Object.prototype.toString.call(arr) === '[object Float32Array]';
 }
 
+//将数据补齐到指定长度,作为dataTexture 纹理数据使用
+export function convertDataTextureBuffer(data, totalLen) {
+    if (isFloat32Array(data) && data.length === totalLen) {
+        return data
+    }
+    const arr = new Float32Array(totalLen);
+    arr.set(data);
+    return arr;
+}
+
+//满足给定长度的最小的纹理尺寸, 宽高均为2的幂,且宽高之间差值最小。
+export function calcDataTexSize(len){
+    if (!len) {
+        return null;
+    } else {
+        const length = near2PowG(len);
+        const l = Math.log2(length);
+        const cols = Math.ceil(l / 2);
+        const rows = l - cols;
+        return [2 ** cols, 2 ** rows];
+    }
+}
+
+
 //id转rgba, r低位 -> a高位
 export function id2RGBA(id) {
     return [
@@ -59,20 +83,6 @@ export function getOptimalUnpackAlign(v) {
     return !(v & 0b111) ? 8 : !(v & 0b11) ? 4 : !(v & 0b1) ? 2 : 1
 }
 
-//获取数组的最大最小值
-export function getMinMax(arr, ignoreVal) {
-    let min = Infinity, max = -Infinity;
-    for (let i = 0; i < arr.length; i++) {
-        const v = arr[i];
-        if (v === ignoreVal || isNaN(v)) continue;
-        min = Math.min(v, min);
-        max = Math.max(v, max);
-    }
-    return {
-        min: min === Infinity ? NaN : min,
-        max: max === -Infinity ? NaN : max
-    }
-}
 
 export function nextTick() {
     return new Promise((resolve) => {
@@ -80,6 +90,7 @@ export function nextTick() {
     })
 }
 
+//version checker
 export const VersionNotMatch = "version not match";
 
 function _promisify(param) {

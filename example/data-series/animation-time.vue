@@ -109,6 +109,7 @@ export default {
         const container = this.$refs.map;
         const {map, view} = await this.initMap(container);
         const baseLayer = await this.loadCustomLy();
+        window.__ll = baseLayer;
         const [Graphic,GraphicsLayer] = await loadModules(["esri/Graphic","esri/layers/GraphicsLayer"]);
         this.layer = baseLayer;
         map.add(baseLayer);
@@ -201,9 +202,15 @@ export default {
         },
         async loadCustomLy() {
             const graphics = await this.getGraphics();
+            const l = graphics.length;
+            graphics.forEach((g,idx)=>{
+                if(!g.attributes) g.attributes = {};
+                g.attributes.valIndex = l - idx - 1;
+            })
             return await this.$layerLoaders.loadDataSeriesGraphicsLayer({
                 id: this.layerId,
                 graphics: graphics,
+                indexKey: 'valIndex'
             })
         },
         async getGraphics() {

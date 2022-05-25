@@ -17,7 +17,7 @@ import {
     WebGLRenderer
 } from "three";
 import {ClientRasterFragShader, ClientRasterVertexShader} from "@src/layer/glsl/RasterColormap.glsl";
-import {genColorRamp, getRenderTarget} from "@src/utils";
+import {genColorRamp, getOptimalUnpackAlign, getRenderTarget} from "@src/utils";
 import {buildModule} from "@src/builder";
 import {loadModules} from "esri-loader";
 
@@ -38,7 +38,7 @@ async function ClientRasterColormapLayerBuilder() {
     ]);
     await projection.load();
 
-    const CMOpts = Accessor.createSubclass({
+    const RenderOpts = Accessor.createSubclass({
         constructor: function () {
             this.filterRange = null;
             this.colorStops = defaultColorStops;
@@ -147,7 +147,6 @@ async function ClientRasterColormapLayerBuilder() {
                     if (arr.length !== size) throw new Error(`数据长度不匹配,length:${arr.length},cols:${cols},rows:${rows}`);
                     return new Float32Array(arr);
                 });
-                const unpackAlign = cols % 8 === 0 ? 8 : (cols % 4 === 0 ? 4 : (cols % 2 === 0 ? 2 : 1));
 
                 this.dataset = {
                     times: times,
@@ -156,7 +155,7 @@ async function ClientRasterColormapLayerBuilder() {
                     maxTime: times[times.length - 1],
                     cols: cols,
                     rows: rows,
-                    unpackAlignment: unpackAlign,
+                    unpackAlignment: getOptimalUnpackAlign(cols),
                     flipY: flipY,
                     noDataValue,
                     getDataByTime(t) {
@@ -406,24 +405,21 @@ async function ClientRasterColormapLayerBuilder() {
         },
     });
     return Layer.createSubclass({
-        declaredClass: 'custom.clientRasterColormapLayer',
         constructor: function () {
             this.curTime = null;
             this.data = null;
-            this.valueRange = null;
             Object.defineProperties(this, {
                 _cm: {
                     enumerable: false,
                     writable: false,
                     configurable: false,
-                    value: new CMOpts()
+                    value: new RenderOpts()
                 },
             });
         },
         properties: {
             curTime: {},
             data: {},
-            valueRange: {},
             renderOpts: {
                 get() {
                     return this._cm;

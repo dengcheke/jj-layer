@@ -1,7 +1,7 @@
 <template>
     <div style="position: relative;width: 100%;height: 100%;overflow:hidden;">
         <div class="map-wrapper base"/>
-        <img :src="colorRamp" style="position:absolute;right: 400px;top: 100px;"/>
+        <img :src="colorRamp" style="position:absolute;right: 100px;top: 400px;"/>
     </div>
 </template>
 
@@ -83,7 +83,7 @@ export default {
                 flowParams.velocityScale = layer.renderOpts.velocityScale = 1;
             } else {
                 layer.data = data2;
-                layer.renderOpts.valueRange = [0, 0.15]
+                layer.renderOpts.speedRange = [0, 0.15]
                 view.center = {
                     type: 'point',
                     x: 12907021.08629284,

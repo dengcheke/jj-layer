@@ -252,13 +252,17 @@ const layer = await loadDataSeriesGraphicsLayer({
         ...,
         [tn, [v1n,v2n,v3n,v4n,...]],
     ] //required ,
-    renderOpts:{
+    // if indexKey is null, dataIndex will be graphic's index in layer.graphics
+    // if indexKey is string, dataIndex will be graphic.attributes[indexKey]
+    // if indexKey is function, dataIndex is the return value of indexKey(graphic);
+    indexKey: null | string | (graphic) => number, //option, 
+    renderOpts: {
         colorStops: [
             {value:0,color:'green'},
             {value:1,color:'red'},
         ], //colorStops arr or image src, optional
         valueRange: [0,1]  //[minValue, maxValue], required
-    }
+    },
 })
 map.add(layer)
 let t = 0, tMax = 100;
