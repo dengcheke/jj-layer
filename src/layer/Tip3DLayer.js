@@ -40,6 +40,7 @@ async function Tip3DLayerBuilder() {
         constructor: function () {
             this._handlers = [];
             this.fullExtent = null;
+            this.projCache = new WeakMap()
         },
 
         attach: function () {
@@ -77,6 +78,7 @@ async function Tip3DLayerBuilder() {
                 renderer, light, camera, tip, tipScene
             });
             const viewSR = this.view.spatialReference;
+            const projCache = this.projCache;
             const handleDataChange = change => {
                 if (this.destroyed) return;
                 const adds = change.added ? [...change.added] : null;
@@ -85,12 +87,13 @@ async function Tip3DLayerBuilder() {
                 adds && adds.forEach(({geometry}) => {
                     if (geometry.type !== 'point') return;
                     if (!viewSR.equals(geometry.spatialReference)) {
-                        geometry.cache.proj = projection.project(geometry, viewSR);
+                        const proj = projection.project(geometry, viewSR);
+                        projCache.set(geometry,proj);
                     } else {
-                        geometry.cache.proj = geometry;
+                        projCache.set(geometry,geometry);
                     }
                 });
-                const allProjs = graphics.map(g => g.geometry.cache.proj).filter(Boolean);
+                const allProjs = graphics.map(g => projCache.get(g.geometry)).filter(Boolean);
                 const xs = allProjs.map(p => p.x);
                 const ys = allProjs.map(p => p.y);
                 const extent = new Extent({
@@ -102,7 +105,7 @@ async function Tip3DLayerBuilder() {
                 });
                 if (extent.xmin === extent.xmax) extent.xmax += 0.001;
                 if (extent.ymin === extent.ymax) extent.ymax += 0.001;
-                this.layer.fullExtent = this.extent = extent;
+                this.layer.fullExtent = this.fullExtent = extent;
                 this.requestRender();
             }
             this._handlers.push(watchUtils.on(this, "layer.graphics", "change", handleDataChange));
@@ -110,6 +113,8 @@ async function Tip3DLayerBuilder() {
                 remove: () => {
                     tip.material.dispose();
                     tip.geometry.dispose();
+                    renderer.dispose();
+                    this.renderer = this.light = this.camera = this.tip = this.tipScene = null;
                 }
             });
             handleDataChange({
@@ -128,8 +133,8 @@ async function Tip3DLayerBuilder() {
         render: function ({state}) {
             if (this.destroyed) return;
             if (!this.layer.visible
-                || !this.layer.fullExtent
-                || !this.layer.fullExtent.intersects(state.extent)
+                || !this.fullExtent
+                || !state.extent.intersects(this.fullExtent)
             ) return;
             const hasShow = this.layer.graphics.find(g => g.visible);
             if (!hasShow) return;
@@ -167,7 +172,7 @@ async function Tip3DLayerBuilder() {
         },
 
         calcRenderInfo(graphic) {
-            const proj = graphic.geometry.cache.proj;
+            const proj = this.projCache.get(graphic.geometry);
             if (!proj) return;
             let renderInfo = graphic._renderInfo;
             if (!renderInfo) {
