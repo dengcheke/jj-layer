@@ -118,7 +118,8 @@ async function ClientRasterFlowLineLayerBuilder() {
             const mesh = this.lineMesh = new LineSegments2(new LineSegmentsGeometry(), material);
             this._handlers.push({
                 remove: () => {
-                    mesh.material.dispose();
+                    material.uniforms.u_colorRamp.value?.dispose();
+                    material.dispose();
                     mesh.geometry.dispose();
                     renderer.dispose();
                     this.lineMesh = null;

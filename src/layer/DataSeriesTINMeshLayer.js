@@ -132,6 +132,7 @@ async function DataSeriesTINLayerBuilder() {
                     material.uniforms.u_colorRamp.value?.dispose();
                     material.uniforms.u_beforeTex.value?.dispose();
                     material.uniforms.u_afterTex.value?.dispose();
+                    material.dispose();
                     pickRT.dispose();
                     this.renderer.dispose();
                     this.meshObj = this.renderer = this.camera = this.pickObj = null;

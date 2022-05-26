@@ -155,6 +155,7 @@ async function ClientVectorFieldLayerBuilder() {
                     material.uniforms.u_arrowTex.value?.dispose();
                     material.uniforms.u_beforeTex.value?.dispose();
                     material.uniforms.u_afterTex.value?.dispose();
+                    material.dispose();
                     this.renderer.dispose();
                     this.mesh = this.camera = this.renderer = null;
                 }

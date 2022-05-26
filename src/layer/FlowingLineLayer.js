@@ -1,4 +1,4 @@
-import {doubleToTwoFloats, getRenderTarget, id2RGBA, RGBA2Id} from "@src/utils";
+import {createVersionChecker, doubleToTwoFloats, getRenderTarget, id2RGBA, RGBA2Id, versionErrCatch} from "@src/utils";
 import {
     BufferGeometry,
     CustomBlending,
@@ -22,7 +22,7 @@ import {buildModule} from "@src/builder";
 import {WORKER_PATH} from "@src/layer/commom";
 import {loadModules} from "esri-loader";
 
-//version check 4.12 - 4.22
+
 const DEFAULT_CONFIG = {
     color: "#ff0000",
     width: 8,
@@ -71,11 +71,9 @@ async function FlowingLineLayerBuilder() {
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
             this._handlers = [];
-            this.hasData = false;
 
             this.fullExtent = null;
             this.meshes = null;
-            this.version = 0;
 
             this.defaultColor = new Color(DEFAULT_CONFIG.color);
             this.defaultWidth = DEFAULT_CONFIG.width;
@@ -120,101 +118,98 @@ async function FlowingLineLayerBuilder() {
                 fragmentShader: FlowLineFragShader,
             });
             this.lineMesh = new Mesh(new BufferGeometry(), material);
+            this.lineMesh.frustumCulled = false;
+
             const pickRT = new WebGLRenderTarget(1, 1);
             const pixelBuffer = new Uint8Array(4);
             this.pickObj = {pickRT, pixelBuffer}
 
             let visibleWatcher = null;
+            const check = createVersionChecker('graphics');
+            const meshCache = new WeakMap();
+            const projExtentCache = new WeakMap();
             const handleDataChange = async () => {
                 if (this.destroyed) return;
-
+                const graphics = this.layer.graphics.items;
+                const viewSR = this.view.spatialReference;
                 {
-                    this.hasData = false;
                     this.layer.fullExtent = null;
                     this.fullExtent = null;
+                    this.updateFlags.clear();
+                    this.meshes = null;
                     visibleWatcher?.remove();
                     visibleWatcher = null;
-                    this.meshes = null;
                 }
-                const _version = ++this.version;
-                const viewSR = this.view.spatialReference;
-                let fullExtent = null;
-                const graphics = this.layer.graphics;
-
-                const connect = await workers.open(WORKER_PATH);
-                const tasks = graphics.map(async (g, idx) => {
-                    let extent, mesh;
-                    if (g.geometry.cache.mesh) {
-                        extent = g.geometry.cache.extent;
-                        mesh = g.geometry.cache.mesh;
-                    } else {
-                        const res = await connect.invoke('tessellateFlowLine',
-                            JSON.stringify({
-                                sr: viewSR.toJSON(),
-                                geometry: g.geometry.toJSON()
-                            }));
-                        mesh = res.mesh;
-                        extent = res.extent;
-                        g.geometry.cache.mesh = mesh;
-                        g.geometry.cache.extent = extent;
-                    }
-                    if (_version === this.version) {
-                        if (!fullExtent) {
-                            fullExtent = new Extent(extent)
-                        } else {
-                            fullExtent.union(extent)
-                        }
-                    }
-                    return {
-                        mesh: mesh,
-                        attributes: g.attributes || {},
-                        pickId: idx + 1,
-                        graphic: g
-                    }
-                });
-                const meshes = await Promise.all(tasks._items);
-
-                if (this.destroyed) return;
-                if (_version !== this.version) {
-                    this.updateFlags.clear();
+                if (!graphics.length) {
+                    this.requestRender();
                     return;
                 }
-                meshes.version = _version;
-                this.meshes = meshes;
-                {
-                    let vertexCount = 0, indexCount = 0;
-                    for (let i = 0; i < meshes.length; i++) {
-                        const mesh = meshes[i].mesh;
-                        for (let j = 0; j < mesh.length; j++) {
-                            const {vertices, indices} = mesh[j];
-                            vertexCount += vertices.length;
-                            indexCount += indices.length;
+
+                check(async () => {
+                    let fullExtent = null;
+                    const connect = await workers.open(WORKER_PATH);
+                    const task = graphics.map(async (g, idx) => {
+                        if (!meshCache.has(g.geometry)) {
+                            const {mesh, extent} = await connect.invoke(
+                                'tessellateFlowLine',
+                                JSON.stringify({
+                                    sr: viewSR.toJSON(),
+                                    geometry: g.geometry.toJSON()
+                                })
+                            );
+                            meshCache.set(g.geometry, mesh);
+                            projExtentCache.set(g.geometry, new Extent(extent));
                         }
+                        const mesh = meshCache.get(g.geometry);
+                        const extent = projExtentCache.get(g.geometry);
+                        if (!fullExtent) {
+                            fullExtent = extent.clone();
+                        } else {
+                            fullExtent.union(extent);
+                        }
+                        return {
+                            mesh,
+                            attributes: g.attributes || {},
+                            pickId: idx + 1,
+                            graphic: g
+                        }
+                    });
+                    const meshes = await Promise.all(task);
+                    return {meshes, fullExtent}
+                }).then(({fullExtent, meshes}) => {
+                    this.meshes = meshes;
+                    {
+                        let vertexCount = 0, indexCount = 0;
+                        for (let i = 0; i < meshes.length; i++) {
+                            const mesh = meshes[i].mesh;
+                            for (let j = 0; j < mesh.length; j++) {
+                                const {vertices, indices} = mesh[j];
+                                vertexCount += vertices.length;
+                                indexCount += indices.length;
+                            }
+                        }
+                        this.meshes.vertexCount = vertexCount;
+                        this.meshes.indexCount = indexCount;
                     }
-                    this.meshes.vertexCount = vertexCount;
-                    this.meshes.indexCount = indexCount;
-                    this.hasData = !!indexCount;
-                }
-                this.layer.fullExtent = fullExtent;
-                this.fullExtent = fullExtent;
-                visibleWatcher = createVisibleWatcher(graphics);
-                this.updateFlags.add(Flags.data);
-                this.requestRender();
+                    this.layer.fullExtent = this.fullExtent = fullExtent;
+                    visibleWatcher = createVisibleWatcher(graphics);
+                    this.updateFlags.add(Flags.data);
+                    this.requestRender();
+                }).catch(versionErrCatch)
             };
-            this._handlers.push(this.layer.renderOpts.watch("minAlpha,length,speed,cycle", () => {
-                this.requestRender();
-            }))
             this._handlers.push(watchUtils.on(this,
                 "layer.graphics", "change",
                 handleDataChange, handleDataChange
             ));
+            this._handlers.push(this.layer.renderOpts.watch(["minAlpha", "length", "speed", "cycle"], () => this.requestRender()))
             this._handlers.push({
                 remove: () => {
                     visibleWatcher?.remove();
-                    this.lineMesh.material.dispose();
+                    material.dispose();
                     this.lineMesh.geometry.dispose();
                     pickRT.dispose();
                     this.renderer.dispose();
+
                     this.pickObj = null;
                     this.lineMesh = null;
                     this.camera = null;
@@ -242,13 +237,15 @@ async function FlowingLineLayerBuilder() {
 
         render: function ({state}) {
             if (this.destroyed) return;
-            if (!this.layer.visible
-                || !this.hasData
-                || !this.layer.fullExtent
-                || !this.layer.fullExtent.intersects(state.extent)
+            const {layer, meshes, fullExtent} = this;
+            if (!meshes?.vertexCount
+                || !layer.visible
+                || !fullExtent
+                || !state.extent.intersects(fullExtent)
             ) return;
             const hasShow = this.layer.graphics.find(g => g.visible);
             if (!hasShow) return;
+
             this.updateBufferData()
             this.updateRenderParams(state);
 
@@ -263,8 +260,7 @@ async function FlowingLineLayerBuilder() {
         },
 
         updateBufferData: function () {
-            if (this.meshes?.version !== this.version) return;
-            if (!this.updateFlags.size) return;
+            if (this.destroyed || !this.updateFlags.size) return;
             const {lineMesh} = this;
 
             const dataChange = this.updateFlags.has(Flags.data),
@@ -316,7 +312,9 @@ async function FlowingLineLayerBuilder() {
                     pickColor = dataChange ? id2RGBA(pickId) : null;
                 const visible = graphic.visible ? 1.0 : 0.0;
                 const width = attributes.width || this.defaultWidth;
-                const color = new Color(attributes.color || this.defaultColor);
+                const color = appearChange
+                    ? new Color(attributes.color || this.defaultColor)
+                    : null
                 //subpath
                 for (let pathIdx = 0; pathIdx < mesh.length; pathIdx++) {
                     const {indices, vertices, totalDis} = mesh[pathIdx];
@@ -328,17 +326,23 @@ async function FlowingLineLayerBuilder() {
                         }
                     }
                     for (let i = 0; i < vertices.length; ++i) {
+                        const c4 = currentVertex * 4,
+                            c2 = currentVertex * 2,
+                            c41 = c4 + 1,
+                            c42 = c4 + 2,
+                            c43 = c4 + 3;
+
                         if (dataChange) {
                             const v = vertices[i], {x, y} = v;
                             const [hx, lx] = doubleToTwoFloats(x);
                             const [hy, ly] = doubleToTwoFloats(y);
-                            posBuf[currentVertex * 4] = hx;
-                            posBuf[currentVertex * 4 + 1] = hy;
-                            posBuf[currentVertex * 4 + 2] = lx;
-                            posBuf[currentVertex * 4 + 3] = ly;
+                            posBuf[c4] = hx;
+                            posBuf[c41] = hy;
+                            posBuf[c42] = lx;
+                            posBuf[c43] = ly;
 
-                            offsetBuf[currentVertex * 2] = v.xOffset;
-                            offsetBuf[currentVertex * 2 + 1] = v.yOffset;
+                            offsetBuf[c2] = v.xOffset;
+                            offsetBuf[c2 + 1] = v.yOffset;
 
                             disBuf[currentVertex] = v.distance;
                             totalDisBuf[currentVertex] = totalDis;
@@ -346,19 +350,19 @@ async function FlowingLineLayerBuilder() {
                             sideBuf[currentVertex] = v.side;
                             disBuf[currentVertex] = v.distance;
 
-                            pickColorBuf[currentVertex * 4] = pickColor[0];
-                            pickColorBuf[currentVertex * 4 + 1] = pickColor[1];
-                            pickColorBuf[currentVertex * 4 + 2] = pickColor[2];
-                            pickColorBuf[currentVertex * 4 + 3] = pickColor[3];
+                            pickColorBuf[c4] = pickColor[0];
+                            pickColorBuf[c41] = pickColor[1];
+                            pickColorBuf[c42] = pickColor[2];
+                            pickColorBuf[c43] = pickColor[3];
                         }
 
                         if (appearChange) {
                             widthBuf[currentVertex] = width;
 
-                            colorBuf[currentVertex * 4] = color.r;
-                            colorBuf[currentVertex * 4 + 1] = color.g;
-                            colorBuf[currentVertex * 4 + 2] = color.b;
-                            colorBuf[currentVertex * 4 + 3] = color.a * 255;
+                            colorBuf[c4] = color.r;
+                            colorBuf[c41] = color.g;
+                            colorBuf[c42] = color.b;
+                            colorBuf[c43] = color.a * 255;
 
                             visibleBuf[currentVertex] = visible;
                         }
@@ -483,8 +487,8 @@ async function FlowingLineLayerBuilder() {
             }
             if (!this.layer.visible
                 || !this.view.stationary
-                || !this.layer.fullExtent
-                || !this.layer.fullExtent.contains(point)
+                || !this.fullExtent
+                || !this.fullExtent.contains(point)
             ) {
                 return Promise.resolve(null);
             }

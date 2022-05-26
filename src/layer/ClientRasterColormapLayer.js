@@ -122,10 +122,11 @@ async function ClientRasterColormapLayerBuilder() {
             this.mesh.frustumCulled = false;
             this._handlers.push({
                 remove: () => {
-                    this.mesh.geometry.dispose();
                     material.uniforms.u_colorRamp.value?.dispose();
-                    material.uniforms.u_beforeTex.value.dispose();
-                    material.uniforms.u_afterTex.value.dispose();
+                    material.uniforms.u_beforeTex.value?.dispose();
+                    material.uniforms.u_afterTex.value?.dispose();
+                    material.dispose();
+                    this.mesh.geometry.dispose();
                     this.mesh = null;
                 }
             })

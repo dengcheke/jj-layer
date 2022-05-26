@@ -56,6 +56,7 @@ async function DataSeriesGraphicsLayerBuilder() {
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
             this._handlers = [];
+            this.fullExtent = null;
             this.dataset = null;
             this.indexKey = null;
             this.colorRampReady = false;
@@ -117,6 +118,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                     material.uniforms.u_beforeTex.value?.dispose();
                     material.uniforms.u_afterTex.value?.dispose();
                     pickRT.dispose();
+                    material.dispose();
                     this.renderer.dispose();
                     this.meshObj = this.renderer = this.camera = this.pickObj = null;
                 }
@@ -151,13 +153,15 @@ async function DataSeriesGraphicsLayerBuilder() {
             }
             const handleGraphicChanged = async () => {
                 if (this.destroyed) return;
-                const graphics = this.layer.graphics;
+                const graphics = this.layer.graphics.items;
                 const viewSR = this.view.spatialReference;
-                this.layer.fullExtent = null;
-                this.meshes = null;
-                this.updateFlags.clear();
-                visibleWatcher?.remove();
-                visibleWatcher = null;
+                {
+                    this.layer.fullExtent = this.fullExtent = null;
+                    this.meshes = null;
+                    this.updateFlags.clear();
+                    visibleWatcher?.remove();
+                    visibleWatcher = null;
+                }
 
                 if (!graphics.length) {
                     this.requestRender();
@@ -184,7 +188,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                             pickIdx: idx + 1,
                         }
                     })
-                    const meshes = await Promise.all(task._items);
+                    const meshes = await Promise.all(task);
                     return {meshes, fullExtent}
 
                     function unionExtent(geo) {
@@ -215,7 +219,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                     meshes.indexCount = this.meshes.reduce(function (indexCount, item) {
                         return indexCount + item.mesh.indices.length;
                     }, 0);
-                    this.layer.fullExtent = fullExtent;
+                    this.layer.fullExtent = this.fullExtent = fullExtent;
                     visibleWatcher = createVisibleWatcher(graphics);
                     this.updateFlags.add(Flags.data);
                     this.requestRender();
@@ -260,15 +264,15 @@ async function DataSeriesGraphicsLayerBuilder() {
 
         render: function ({state}) {
             if (this.destroyed) return;
-            const {layer, dataset, meshes, colorRampReady} = this;
+            const {layer, dataset, meshes, colorRampReady, fullExtent} = this;
             const {renderOpts} = layer;
             if (!colorRampReady
                 || !layer.visible
                 || !renderOpts.valueRange
                 || !dataset
-                || !meshes?.length
-                || !layer.fullExtent
-                || !state.extent.intersects(layer.fullExtent)
+                || !meshes?.vertexCount
+                || !fullExtent
+                || !state.extent.intersects(fullExtent)
             ) return;
 
             const hasShow = this.layer.graphics.find(g => g.visible);
@@ -484,8 +488,9 @@ async function DataSeriesGraphicsLayerBuilder() {
             }
 
             if (!this.layer.visible
-                || !this.layer.fullExtent
-                || !this.layer.fullExtent.contains(point)
+                || !this.view.stationary
+                || !this.fullExtent
+                || !this.fullExtent.contains(point)
             ) return Promise.resolve(null);
 
             const state = this.view.state;
