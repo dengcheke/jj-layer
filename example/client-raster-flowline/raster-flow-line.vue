@@ -80,6 +80,7 @@ export default {
                 layer.data = data1;
                 view.center = [120, 20];
                 view.scale = 3611100.909643
+                layer.renderOpts.speedRange = null;
                 flowParams.velocityScale = layer.renderOpts.velocityScale = 1;
             } else {
                 layer.data = data2;

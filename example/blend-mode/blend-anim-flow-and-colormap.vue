@@ -1,6 +1,6 @@
 <template>
     <div style="position: relative;width: 100%;height: 100%">
-        <div class="map-wrapper base" ref="map"/>
+        <div ref="map" class="map-wrapper base"/>
     </div>
 </template>
 
@@ -139,7 +139,7 @@ export default {
 }
 </script>
 
-<style scoped lang="less">
+<style lang="less" scoped>
 .map-wrapper.base {
     height: 100%;
     width: 100%;

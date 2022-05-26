@@ -1,23 +1,11 @@
+import {createVersionChecker, getRenderTarget, nextTick, RGBA2Id, versionErrCatch} from "@src/utils";
 import {
-    createVersionChecker,
-    genColorRamp,
-    getOptimalUnpackAlign,
-    getRenderTarget,
-    isFloat32Array,
-    near2PowG,
-    nextTick,
-    RGBA2Id,
-    VersionNotMatch
-} from "@src/utils";
-import {
-    AlphaFormat,
     BufferGeometry,
     Color,
     CustomBlending,
     DataTexture,
     DoubleSide,
     Float32BufferAttribute,
-    FloatType,
     InstancedBufferAttribute,
     InstancedBufferGeometry,
     InstancedInterleavedBuffer,
@@ -29,14 +17,19 @@ import {
     OrthographicCamera,
     RawShaderMaterial,
     SrcAlphaFactor,
-    TextureLoader,
     Vector2,
     WebGLRenderer,
     WebGLRenderTarget
 } from "three";
 import {buildModule} from "@src/builder";
 import {DataSeriesTINFragShader, DataSeriesTINVertexShader} from "@src/layer/glsl/DataSeriesTIN.glsl";
-import {WORKER_PATH} from "@src/layer/commom";
+import {
+    _checkTimeTexNeedUpdate,
+    _dataHandle_updateDataTexture,
+    _updateTimeTex,
+    createColorStopsHandle,
+    WORKER_PATH
+} from "@src/layer/commom";
 import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3()
@@ -45,7 +38,7 @@ const DEFAULT_COLOR_STOPS = [
     {value: 1, color: 'red'}
 ]
 
-function createNewGeometry(type) {
+function createNewGeometry() {
     const geo = new InstancedBufferGeometry();
     geo.setAttribute('position', new Float32BufferAttribute([
         1, 0, 0,
@@ -70,6 +63,7 @@ async function DataSeriesTINLayerBuilder() {
         "esri/geometry/projection",
         "esri/kernel"
     ]);
+    await projection.load();
     const ARCGIS_VERSION = parseFloat(kernel.version);
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
@@ -91,7 +85,8 @@ async function DataSeriesTINLayerBuilder() {
             this.percent = 0;
 
             this.needUpdateTimeTex = false;
-            this.timeTexStrategy = null; //更新策略 'swap-forward', 'swap-backward'
+            this.forceUpdateTimeTex = false;
+            this.timeTexStrategy = null;
         },
 
         attach: function () {
@@ -146,70 +141,20 @@ async function DataSeriesTINLayerBuilder() {
             const layer = this.layer;
             const renderOpts = layer.renderOpts;
 
-            const vCheck = createVersionChecker();
             //geometry
+            const check1 = createVersionChecker('geometry');
             const geometryHandle = () => {
                 this.geometryReady = false;
                 this._getTriangleByPickIndex = null;
-                vCheck(this.processTINMesh(this.layer.tinMesh))
+                check1(this.processTINMesh(layer.tinMesh))
                     .then(result => {
-                        this.updateGeometry(result);
+                        this.updateGeometryBuffer(result);
                         this.requestRender();
-                    }).catch(e => {
-                    if (e.message !== VersionNotMatch) throw e;
-                });
+                    }).catch(versionErrCatch);
             }
             this._handlers.push(layer.watch('tinMesh', geometryHandle));
 
-            const dataHandle = () => {
-                if (this.destroyed) return;
-                const data = layer.data;
-                data.sort((a, b) => +a[0] - +b[0]);
-                const times = data.map(item => +item[0]);
-                const dataLen = data[0][1].length;
-                const texSize = this.calcTexSize(dataLen);
-                const totalLen = texSize[0] * texSize[1];
-                const pixels = data.map(item => {
-                    const obj = {
-                        needAlign: true,
-                        data: null,
-                    }
-                    obj.align = () => {
-                        obj.data = alignData(item[1], totalLen);
-                        obj.needAlign = false;
-                        obj.align = null;
-                    }
-                    return obj;
-                });
-                const unpackAlign = getOptimalUnpackAlign(texSize[0]);
-                this.dataset = {
-                    times: times,
-                    pixels: pixels,
-                    minTime: times[0],
-                    maxTime: times[times.length - 1],
-                    texSize,
-                    unpackAlignment: unpackAlign,
-                    flipY: false, //must be false
-                    getDataByTime(t) {
-                        const item = pixels[times.indexOf(t)];
-                        if (item.needAlign) {
-                            item.align();
-                        }
-                        return item.data;
-                    }
-                }
-                this.needUpdateTimeTex = true;
-                this.requestRender();
-
-                function alignData(data, totalLen) {
-                    if (isFloat32Array(data) && data.length === totalLen) {
-                        return data
-                    }
-                    const arr = new Float32Array(totalLen);
-                    arr.set(data);
-                    return arr;
-                }
-            }
+            const dataHandle = () => _dataHandle_updateDataTexture.call(this);
             this._handlers.push(layer.watch('data', dataHandle));
 
             //watch uniforms
@@ -218,23 +163,8 @@ async function DataSeriesTINLayerBuilder() {
             this._handlers.push(renderOpts.watch('meshColor', () => {
                 renderOpts.showMesh && this.requestRender();
             }));
-            const colorStopsHandle = () => {
-                let v = renderOpts.colorStops;
-                if (!v) {
-                    console.warn('colorStops is empty')
-                    return
-                }
-                if (Array.isArray(v)) {
-                    v = genColorRamp(v, 128, 1);
-                }
-                this.colorRampReady = false;
-                new TextureLoader().load(v, (newTexture) => {
-                    material.uniforms.u_colorRamp.value?.dispose();
-                    material.uniforms.u_colorRamp.value = newTexture;
-                    this.colorRampReady = true;
-                    this.requestRender();
-                })
-            }
+
+            const colorStopsHandle = createColorStopsHandle(this, material);
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
 
             layer.tinMesh && geometryHandle();
@@ -247,15 +177,17 @@ async function DataSeriesTINLayerBuilder() {
             this._handlers = [];
         },
 
-        render: function (renderParameters) {
+        render: function ({state}) {
             if (this.destroyed) return;
-            if (!this.colorRampReady || !this.geometryReady) return;
-            const state = renderParameters.state;
-            if (!this.layer.visible
-                || !this.layer.renderOpts.valueRange
-                || !this.fullExtent
-                || !state.extent.intersects(this.fullExtent)
+            const {colorRampReady, geometryReady,layer,fullExtent} = this;
+            if (!colorRampReady
+                || !geometryReady
+                || !layer.visible
+                || !layer.renderOpts.valueRange
+                || !fullExtent
+                || !state.extent.intersects(fullExtent)
             ) return;
+
             this.checkTimeTexNeedUpdate();
             this.updateRenderParams(state);
 
@@ -307,122 +239,18 @@ async function DataSeriesTINLayerBuilder() {
             uniform.u_isPick.value = false;
             uniform.u_percent.value = this.percent;
             const renderOpts = layer.renderOpts;
-            uniform.u_valueRange.value.set(
-                renderOpts.valueRange[0],
-                renderOpts.valueRange[1]
-            );
-            const {flipY, texSize} = this.dataset;
+            uniform.u_valueRange.value.set(renderOpts.valueRange[0], renderOpts.valueRange[1]);
+            const {texSize} = this.dataset;
             uniform.u_texSize.value.set(texSize[0], texSize[1]);
             uniform.u_showMesh.value = !!renderOpts.showMesh;
             uniform.u_meshColor.value.set(renderOpts.meshColor);
             if (this.needUpdateTimeTex) {
-                const {beforeTime, afterTime} = this;
-                let beforeTex = uniform.u_beforeTex.value;
-                let afterTex = uniform.u_afterTex.value;
-                [beforeTex, afterTex].forEach(tex => {
-                    tex.format = AlphaFormat;
-                    tex.type = FloatType;
-                    tex.flipY = flipY;
-                    tex.unpackAlignment = this.dataset.unpackAlignment
-                })
-                if (this.timeTexStrategy === 'swap-forward') {
-                    [beforeTex, afterTex] = [afterTex, beforeTex];
-                    uniform.u_beforeTex.value = beforeTex;
-                    uniform.u_afterTex.value = afterTex;
-                    afterTex.image = {
-                        data: this.dataset.getDataByTime(afterTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    }
-                    afterTex.needsUpdate = true;
-                } else if (this.timeTexStrategy === 'swap-backward') {
-                    [beforeTex, afterTex] = [afterTex, beforeTex];
-                    uniform.u_beforeTex.value = beforeTex;
-                    uniform.u_afterTex.value = afterTex;
-                    beforeTex.image = {
-                        data: this.dataset.getDataByTime(beforeTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    }
-                    beforeTex.needsUpdate = true;
-                } else {
-                    beforeTex.image = {
-                        data: this.dataset.getDataByTime(beforeTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    };
-                    afterTex.image = {
-                        data: this.dataset.getDataByTime(afterTime),
-                        width: texSize[0],
-                        height: texSize[1]
-                    };
-                    beforeTex.needsUpdate = true;
-                    afterTex.needsUpdate = true;
-                }
-                this.timeTexStrategy = null;
-                this.needUpdateTimeTex = false
+                _updateTimeTex.call(this, uniform);
             }
         },
+
         checkTimeTexNeedUpdate() {
-            const {layer, dataset} = this,
-                {times} = dataset,
-                curTime = layer.curTime,
-                oldBefore = this.beforeTime,
-                oldAfter = this.afterTime;
-            const {maxTime, minTime} = dataset;
-            if (times.length > 1
-                && oldBefore !== null
-                && oldAfter !== null
-                && curTime >= oldBefore
-                && curTime <= oldAfter
-            ) {
-                this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime)
-                return;
-            }
-            if (times.length === 1 || curTime < minTime) {
-                this.beforeTime = this.afterTime = times[0] || 0;
-                this.percent = 0;
-            } else {
-                if (curTime >= maxTime) {
-                    this.afterTime = maxTime;
-                    this.beforeTime = times[times.length - 2];
-                    this.percent = 1;
-                } else {
-                    for (let i = 1; i < times.length; i++) {
-                        if (curTime < times[i]) {
-                            this.afterTime = times[i];
-                            this.beforeTime = times[i - 1];
-                            if (this.afterTime === this.beforeTime) {
-                                this.percent = 0;
-                            } else {
-                                this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime) || 0
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            if (oldBefore !== this.beforeTime || oldAfter !== this.afterTime) {
-                this.needUpdateTimeTex = true;
-                if (oldAfter === this.beforeTime) {
-                    this.timeTexStrategy = 'swap-forward'
-                } else if (oldBefore === this.afterTime) {
-                    this.timeTexStrategy = 'swap-backward'
-                } else {
-                    this.timeTexStrategy = null;
-                }
-            }
-        },
-        calcTexSize: function (len) {
-            if (!len) {
-                return null;
-            } else {
-                const length = near2PowG(len);
-                const l = Math.log2(length);
-                const cols = Math.ceil(l / 2);
-                const rows = l - cols;
-                return [2 ** cols, 2 ** rows];
-            }
+            _checkTimeTexNeedUpdate.call(this)
         },
 
         _getTriangleByPickIndex: null,
@@ -452,7 +280,6 @@ async function DataSeriesTINLayerBuilder() {
             };
 
             if (!new SpatialReference(targetSr).equals(sourceSr)) {
-                await projection.load();
                 fullExtent = projection.project(fullExtent, targetSr);
             } else {
                 fullExtent = new Extent(fullExtent)
@@ -529,7 +356,7 @@ async function DataSeriesTINLayerBuilder() {
                 connect.close();
             }
         },
-        updateGeometry(calcData) {
+        updateGeometryBuffer(calcData) {
             const {
                 vertex: offsetVertexBuffer,
                 pickColor, index,

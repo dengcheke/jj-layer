@@ -40,6 +40,7 @@ import {TN_COLOR_STOPS, TN_DATASET, TN_META, TN_TIMES} from "./tn-config";
 import TimePlayer from '../common/time-player'
 import {TP_COLOR_STOPS, TP_DATASET, TP_META, TP_TIMES} from "./tp-config";
 import {COD_COLOR_STOPS, COD_DATASET, COD_META, COD_TIMES} from "./cod-config";
+import {clamp} from "../utils";
 
 export default {
     name: "clientRasterColormap",
@@ -54,7 +55,8 @@ export default {
             meta: {
                 valueRange: [0, 100]
             },
-            filterRange: [0, 2]
+            filterRange: [0, 2],
+            curTime:null
         }
     },
     async mounted() {
@@ -122,9 +124,8 @@ export default {
                     valueRange: data.valueRange
                 }
             }
-            setTimeout(() => {
-                this.filterRange = [...this.meta.valueRange]
-            }, 16)
+            this.layer.curTime = clamp(this.curTime, this.timeRange[0], this.timeRange[1]);
+            this.filterRange = [...this.meta.valueRange]
         }, {immediate: true});
         this.$once('hook:beforeDestroy', () => {
             this.layer = null;
@@ -137,6 +138,7 @@ export default {
     methods: {
         handleTimeChange(v) {
             this.layer && (this.layer.curTime = v)
+            this.curTime = v;
         },
         handleFilterRangeChange() {
             this.layer && (this.layer.renderOpts.filterRange = [...this.filterRange]);

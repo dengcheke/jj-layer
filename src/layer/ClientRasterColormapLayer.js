@@ -17,9 +17,10 @@ import {
     WebGLRenderer
 } from "three";
 import {ClientRasterFragShader, ClientRasterVertexShader} from "@src/layer/glsl/RasterColormap.glsl";
-import {genColorRamp, getOptimalUnpackAlign, getRenderTarget} from "@src/utils";
+import {genColorRamp, getOptimalUnpackAlign, getRenderTarget, isFloat32Array} from "@src/utils";
 import {buildModule} from "@src/builder";
 import {loadModules} from "esri-loader";
+import {_checkTimeTexNeedUpdate, _updateTimeTex, createColorStopsHandle, valueRangeValidate} from "@src/layer/commom";
 
 const _mat3 = new Matrix3();
 const defaultColorStops = Object.freeze([
@@ -54,13 +55,17 @@ async function ClientRasterColormapLayerBuilder() {
         constructor: function () {
             this._handlers = [];
             this.dataset = null;
+            this.colorRampReady = false;
+            this.fullExtent = null;
 
-            this.needUpdatePosition = false;
-            this.needUpdateTimeTex = false;
+            this.needUpdatePosition = true;
             this.beforeTime = null;
             this.afterTime = null;
-            this.swap = false;
             this.percent = 0;
+
+            this.needUpdateTimeTex = true;
+            this.forceUpdateTimeTex = false;
+            this.timeTexStrategy = null;
         },
 
         attach: function () {
@@ -72,7 +77,6 @@ async function ClientRasterColormapLayerBuilder() {
             this.camera = new OrthographicCamera();
             this.camera.position.set(0, 0, 1000);
             this.camera.updateProjectionMatrix();
-            const loader = new TextureLoader();
             const material = new RawShaderMaterial({
                 blending: CustomBlending,
                 blendSrc: SrcAlphaFactor,
@@ -115,6 +119,7 @@ async function ClientRasterColormapLayerBuilder() {
                         2)
                     ),
                 material);
+            this.mesh.frustumCulled = false;
             this._handlers.push({
                 remove: () => {
                     this.mesh.geometry.dispose();
@@ -124,28 +129,36 @@ async function ClientRasterColormapLayerBuilder() {
                     this.mesh = null;
                 }
             })
+
             const {view, layer} = this;
             const renderOpts = layer.renderOpts;
-            let version = 1;
+
             const dataHandle = () => {
                 if (this.destroyed) return;
+
+                this.fullExtent = null;
+                layer.fullExtent = null;
+                this.dataset = null;
+
                 let data = layer.data;
                 if (!data) {
                     this.dataset = null;
                     return;
                 }
-                const __version = ++version;
                 const {cols, rows, dataArr, noDataValue = -9999, extent, flipY = true} = data;
                 const _extent = projExtent(extent);
-                if (__version !== version) return;
 
                 const size = cols * rows;
                 dataArr.sort((a, b) => +a[0] - (+b[0]));
                 const times = dataArr.map(item => +item[0]);
                 const pixels = dataArr.map(item => {
                     const arr = item[1];
-                    if (arr.length !== size) throw new Error(`数据长度不匹配,length:${arr.length},cols:${cols},rows:${rows}`);
-                    return new Float32Array(arr);
+                    if (arr.length !== size) throw new Error(`data length mismatch,length:${arr.length},cols:${cols},rows:${rows}`);
+                    if(isFloat32Array(arr)){
+                        return arr
+                    }else{
+                        return new Float32Array(arr);
+                    }
                 });
 
                 this.dataset = {
@@ -153,19 +166,18 @@ async function ClientRasterColormapLayerBuilder() {
                     pixels: pixels,
                     minTime: times[0],
                     maxTime: times[times.length - 1],
-                    cols: cols,
-                    rows: rows,
+                    texSize:[cols, rows],//width, height
                     unpackAlignment: getOptimalUnpackAlign(cols),
                     flipY: flipY,
+                    format: AlphaFormat,
+                    type:FloatType,
                     noDataValue,
                     getDataByTime(t) {
                         return pixels[times.indexOf(t)];
-                    },
-                    extent: _extent
+                    }
                 }
-                layer.fullExtent = _extent;
-                this.needUpdateTimeTex = true;
-                this.needUpdatePosition = true;
+                this.fullExtent = layer.fullExtent = _extent;
+                this.forceUpdateTimeTex = true;
                 this.requestRender();
             }
             const projExtent = extent => {
@@ -176,38 +188,14 @@ async function ClientRasterColormapLayerBuilder() {
                 }
                 return extent;
             }
-            const colorStopsHandle = () => {
-                let v = renderOpts.colorStops;
-                if (!v) {
-                    console.warn('colorStops is empty')
-                    return
-                }
-                if (Array.isArray(v)) {
-                    v = genColorRamp(v, 128, 1);
-                }
-                loader.load(v, (newTexture) => {
-                    material.uniforms.u_colorRamp.value?.dispose();
-                    material.uniforms.u_colorRamp.value = newTexture;
-                    newTexture.isReady = true;
-                    this.requestRender();
-                })
-            }
             this._handlers.push(layer.watch('data', dataHandle));
-            this._handlers.push(layer.watch('curTime', () => {
-                this.requestRender();
-            }));
-            this._handlers.push(renderOpts.watch('valueRange', () => {
-                const vv = renderOpts.valueRange;
-                if (vv[1] < vv[0]) {
-                    console.warn('maxVal must be >= minVal');
-                    return;
-                }
-                this.requestRender();
-            }));
+            this._handlers.push(layer.watch('curTime', () => this.requestRender()));
+
+            this._handlers.push(renderOpts.watch(['valueRange','filterRange'], () => this.requestRender()));
+
+            const colorStopsHandle = createColorStopsHandle(this,material)
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
-            this._handlers.push(renderOpts.watch('filterRange', () => {
-                this.requestRender();
-            }));
+
             this._handlers.push(view.watch('extent', () => {
                 this.needUpdatePosition = true;
                 this.requestRender();
@@ -215,7 +203,6 @@ async function ClientRasterColormapLayerBuilder() {
 
             layer.data && dataHandle();
             renderOpts.colorStops && colorStopsHandle();
-            this.requestRender();
         },
 
         detach: function () {
@@ -223,19 +210,21 @@ async function ClientRasterColormapLayerBuilder() {
             this._handlers = [];
         },
 
-        render: function (renderParameters) {
+        render: function ({state}) {
             if (this.destroyed) return;
-            if (!this.layer.visible
-                || !this.layer.renderOpts.valueRange
-                || !this.dataset
-                || !this.dataset.extent
-                || !this.view.extent.intersects(this.dataset.extent)
+            const {layer, dataset,fullExtent, colorRampReady} = this;
+            const {renderOpts} = layer;
+            if (!colorRampReady
+                || !layer.visible
+                || !renderOpts.valueRange
+                || !dataset
+                || !fullExtent
+                || !this.view.extent.intersects(fullExtent)
             ) return
-            if (!this.mesh?.material.uniforms.u_colorRamp.value?.isReady) return;
 
-            this.updatePosition();
+            this.updateBufferData();
             this.checkTimeTexNeedUpdate();
-            this.updateRenderParams(renderParameters.state);
+            this.updateRenderParams(state);
 
             const gl = this.context;
             const {renderer, mesh, camera} = this;
@@ -248,8 +237,7 @@ async function ClientRasterColormapLayerBuilder() {
 
         //更新变换
         updateRenderParams(state) {
-            const {mesh, layer, view, dataset} = this;
-            const extent = dataset.extent;
+            const {mesh, layer, view, dataset, fullExtent:extent} = this;
             const uniform = mesh.material.uniforms;
             const rotate = -(Math.PI * state.rotation) / 180;
             uniform.u_rotate.value.identity().rotate(rotate);
@@ -293,61 +281,26 @@ async function ClientRasterColormapLayerBuilder() {
                 height: extent.height * dpr / r
             }
             const renderOpts = layer.renderOpts;
+            const texSize = dataset.texSize;
             uniform.u_dataInfo.value = {
                 minVal: renderOpts.valueRange[0],
                 maxVal: renderOpts.valueRange[1],
                 noDataVal: dataset.noDataValue,
-                cols: dataset.cols,
-                rows: dataset.rows,
+                cols: texSize[0],
+                rows: texSize[1],
             }
             uniform.u_percent.value = this.percent;
-            const fr = renderOpts.filterRange || renderOpts.valueRange
+            const fr = renderOpts.filterRange || renderOpts.valueRange;
             uniform.u_filterRange.value.set(fr[0], fr[1]);
             //tex
             if (this.needUpdateTimeTex) {
-                const {beforeTime, afterTime} = this;
-                const {cols, rows, flipY} = this.dataset;
-
-                let beforeTex = uniform.u_beforeTex.value;
-                let afterTex = uniform.u_afterTex.value;
-                [beforeTex, afterTex].forEach(tex => {
-                    tex.format = AlphaFormat;
-                    tex.type = FloatType;
-                    tex.flipY = !!flipY;
-                    tex.unpackAlignment = this.dataset.unpackAlignment
-                })
-                if (this.swap) {
-                    [beforeTex, afterTex] = [afterTex, beforeTex];
-                    uniform.u_beforeTex.value = beforeTex;
-                    uniform.u_afterTex.value = afterTex;
-                    afterTex.image = {
-                        data: this.dataset.getDataByTime(afterTime),
-                        width: cols,
-                        height: rows
-                    }
-                    afterTex.needsUpdate = true;
-                } else {
-                    beforeTex.image = {
-                        data: this.dataset.getDataByTime(beforeTime),
-                        width: cols,
-                        height: rows
-                    };
-                    afterTex.image = {
-                        data: this.dataset.getDataByTime(afterTime),
-                        width: cols,
-                        height: rows
-                    };
-                    beforeTex.needsUpdate = true;
-                    afterTex.needsUpdate = true;
-                }
-                this.swap = false;
-                this.needUpdateTimeTex = false
+                _updateTimeTex.call(this, uniform);
             }
         },
 
-        updatePosition() {
+        updateBufferData() {
             if (!this.needUpdatePosition) return;
-            const extent = this.dataset.extent;
+            const extent = this.fullExtent;
             if (!extent) return;
             const center = this.view.state.center;
             const cx = center[0], cy = center[1];
@@ -365,43 +318,7 @@ async function ClientRasterColormapLayerBuilder() {
         },
 
         checkTimeTexNeedUpdate() {
-            const {layer, dataset} = this,
-                {times} = dataset,
-                curTime = layer.curTime,
-                oldBefore = this.beforeTime,
-                oldAfter = this.afterTime;
-            const {maxTime, minTime} = dataset;
-            if (oldBefore !== null && oldAfter !== null && curTime >= oldBefore && curTime <= oldAfter) {
-                this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime)
-                return;
-            }
-            if (times.length === 1 || curTime < minTime) {
-                this.beforeTime = this.afterTime = times[0] || 0;
-                this.percent = 0;
-            } else {
-                if (curTime >= maxTime) {
-                    this.afterTime = maxTime;
-                    this.beforeTime = times[times.length - 2];
-                    this.percent = 1;
-                } else {
-                    for (let i = 1; i < times.length; i++) {
-                        if (curTime < times[i]) {
-                            this.afterTime = times[i];
-                            this.beforeTime = times[i - 1];
-                            if (this.afterTime === this.beforeTime) {
-                                this.percent = 0;
-                            } else {
-                                this.percent = (curTime - this.beforeTime) / (this.afterTime - this.beforeTime) || 0
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            if (oldBefore !== this.beforeTime || oldAfter !== this.afterTime) {
-                this.needUpdateTimeTex = true;
-                this.swap = oldAfter === this.beforeTime;
-            }
+            _checkTimeTexNeedUpdate.call(this)
         },
     });
     return Layer.createSubclass({

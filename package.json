@@ -77,12 +77,12 @@
         "@types/arcgis-js-api": "4.18.0"
     },
     "peerDependencies": {
-        "three": ">=0.135.0"
+        "three": ">=0.135.0",
+        "esri-loader": "^3.0.0"
     },
     "dependencies": {
         "@babel/runtime-corejs3": "^7.14.0",
         "core-js": "^3.9.1",
-        "esri-loader": "^3.0.0",
         "lodash": "^4.17.21"
     }
 }

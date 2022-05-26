@@ -1,15 +1,4 @@
-import {
-    calcDataTexSize,
-    convertDataTextureBuffer,
-    createVersionChecker,
-    doubleToTwoFloats,
-    genColorRamp,
-    getOptimalUnpackAlign,
-    getRenderTarget,
-    id2RGBA,
-    RGBA2Id,
-    versionErrCatch
-} from "@src/utils";
+import {createVersionChecker, doubleToTwoFloats, getRenderTarget, id2RGBA, RGBA2Id, versionErrCatch} from "@src/utils";
 import {
     BufferGeometry,
     CustomBlending,
@@ -23,7 +12,6 @@ import {
     OrthographicCamera,
     RawShaderMaterial,
     SrcAlphaFactor,
-    TextureLoader,
     Uint8ClampedBufferAttribute,
     Vector2,
     Vector4,
@@ -33,7 +21,12 @@ import {
 import {DataSeriesGraphicFragShader, DataSeriesGraphicVertexShader} from "@src/layer/glsl/DataSeries.glsl";
 import {buildModule} from "@src/builder";
 import {loadModules} from "esri-loader";
-import {_checkTimeTexNeedUpdate, _updateTimeTex} from "@src/layer/commom";
+import {
+    _checkTimeTexNeedUpdate,
+    _dataHandle_updateDataTexture,
+    _updateTimeTex,
+    createColorStopsHandle
+} from "@src/layer/commom";
 
 const _mat3 = new Matrix3()
 const DEFAULT_COLOR_STOPS = [
@@ -119,13 +112,13 @@ async function DataSeriesGraphicsLayerBuilder() {
             this._handlers.push({
                 remove: () => {
                     visibleWatcher?.remove();
-                    this.meshObj.geometry.dispose();
+                    this.meshObj.geometry?.dispose();
                     material.uniforms.u_colorRamp.value?.dispose();
                     material.uniforms.u_beforeTex.value?.dispose();
                     material.uniforms.u_afterTex.value?.dispose();
                     pickRT.dispose();
-                    this.pickObj = null;
-                    this.meshObj = null;
+                    this.renderer.dispose();
+                    this.meshObj = this.renderer = this.camera = this.pickObj = null;
                 }
             });
 
@@ -246,58 +239,13 @@ async function DataSeriesGraphicsLayerBuilder() {
             }))
             this._handlers.push(watchUtils.on(this, "layer.graphics", "change", handleGraphicChanged, handleGraphicChanged));
 
-
-            const dataHandle = () => {
-                if (this.destroyed) return;
-                const data = layer.data;
-                data.sort((a, b) => +a[0] - +b[0]);
-                const times = data.map(item => +item[0]);
-                const dataLen = data[0][1].length;
-                const texSize = calcDataTexSize(dataLen);
-                const totalLen = texSize[0] * texSize[1];
-                const pixels = data.map(item => convertDataTextureBuffer(item[1], totalLen));
-                this.dataset = {
-                    times: times,
-                    pixels: pixels,
-                    minTime: times[0],
-                    maxTime: times[times.length - 1],
-                    texSize,
-                    unpackAlignment: getOptimalUnpackAlign(texSize[0]),
-                    flipY: false,
-                    getDataByTime(t) {
-                        return pixels[times.indexOf(t)];
-                    }
-                }
-                this.forceUpdateTimeTex = true;
-                this.requestRender();
-            }
+            const dataHandle = () => _dataHandle_updateDataTexture.call(this);
             this._handlers.push(layer.watch('data', dataHandle));
 
             this._handlers.push(renderOpts.watch('valueRange', () => this.requestRender()));
             this._handlers.push(layer.watch('curTime', () => this.requestRender()));
 
-            const check2 = createVersionChecker('colorRamp');
-            const colorStopsHandle = () => {
-                let v = renderOpts.colorStops;
-                if (!v) throw new Error('dataSeriesGraphics renderOpts.colorStops can not be empty')
-                if (Array.isArray(v)) v = genColorRamp(v, 128, 1);
-                this.colorRampReady = false;
-                check2(
-                    new Promise((resolve, reject) => {
-                        new TextureLoader().load(
-                            v,
-                            newTexture => resolve(newTexture),
-                            null,
-                            () => reject(`load RasterFlowLineLayer colorStops img err, your img src is: "${v}"`)
-                        )
-                    })
-                ).then((newTexture) => {
-                    material.uniforms.u_colorRamp.value?.dispose();
-                    material.uniforms.u_colorRamp.value = newTexture;
-                    this.colorRampReady = true;
-                    this.requestRender();
-                }).catch(versionErrCatch)
-            }
+            const colorStopsHandle = createColorStopsHandle(this, material);
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
 
             layer.indexKey && _updateIndexKey()
@@ -314,12 +262,11 @@ async function DataSeriesGraphicsLayerBuilder() {
             if (this.destroyed) return;
             const {layer, dataset, meshes, colorRampReady} = this;
             const {renderOpts} = layer;
-            if (!layer.visible
+            if (!colorRampReady
+                || !layer.visible
                 || !renderOpts.valueRange
-                || (isNaN(layer.curTime) || layer.curTime === null)
                 || !dataset
                 || !meshes?.length
-                || !colorRampReady
                 || !layer.fullExtent
                 || !state.extent.intersects(layer.fullExtent)
             ) return;
@@ -473,8 +420,8 @@ async function DataSeriesGraphicsLayerBuilder() {
                         pickColorBuf[c4 + 3] = pickColor[3];
 
                     }
-                    if(indexKeyChange) indexBuf[currentVertex] = index;
-                    if(appearChange) visibleBuf[currentVertex] = visible;
+                    if (indexKeyChange) indexBuf[currentVertex] = index;
+                    if (appearChange) visibleBuf[currentVertex] = visible;
                     currentVertex++;
                 }
             }
@@ -650,7 +597,6 @@ async function DataSeriesGraphicsLayerBuilder() {
             }
             return data;
         },
-
         createLayerView: function (view) {
             if (view.type !== "2d") throw new Error('不支持3d')
             return new CustomLayerView2D({

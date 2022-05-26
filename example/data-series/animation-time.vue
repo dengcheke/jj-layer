@@ -66,7 +66,8 @@ export default {
             colorRamp: colorStops,
             timeRange: [1, 288],
             chartData: [],
-            index: null
+            index: null,
+            curTime:null,
         }
     },
     computed: {
@@ -109,7 +110,6 @@ export default {
         const container = this.$refs.map;
         const {map, view} = await this.initMap(container);
         const baseLayer = await this.loadCustomLy();
-        window.__ll = baseLayer;
         const [Graphic,GraphicsLayer] = await loadModules(["esri/Graphic","esri/layers/GraphicsLayer"]);
         this.layer = baseLayer;
         map.add(baseLayer);
@@ -202,15 +202,9 @@ export default {
         },
         async loadCustomLy() {
             const graphics = await this.getGraphics();
-            const l = graphics.length;
-            graphics.forEach((g,idx)=>{
-                if(!g.attributes) g.attributes = {};
-                g.attributes.valIndex = l - idx - 1;
-            })
             return await this.$layerLoaders.loadDataSeriesGraphicsLayer({
                 id: this.layerId,
-                graphics: graphics,
-                indexKey: 'valIndex'
+                graphics: graphics
             })
         },
         async getGraphics() {
@@ -221,6 +215,7 @@ export default {
             if (this.layer) {
                 this.layer.curTime = v;
             }
+            this.curTime = v;
         },
         async handleTypeChange(s) {
             if (!s) return
@@ -232,7 +227,7 @@ export default {
                 await this.loadData(s);
             }
             layer.data = type.data
-            layer.curTime = 1;
+            layer.curTime = this.curTime || 1;
             layer.renderOpts.valueRange = [type.min, type.max]
         },
         async loadData(s) {
