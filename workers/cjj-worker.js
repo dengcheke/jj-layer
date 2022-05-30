@@ -501,7 +501,7 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
     }
 
     const sampler = createSampler(data);
-    const paths = buildRasterPaths(setting, sampler, data.width, data.height);
+    const paths = buildRasterPaths(setting, sampler);
     const {buffer1, buffer2, buffer3,buffer4} = toBuffer(paths);
     return {
         result: {
@@ -571,21 +571,18 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
         }
     }
 
-    function buildRasterPaths(setting, sampler, width, height) {
+    function buildRasterPaths(setting, sampler) {
         const result = [];
         const [xmin, xmax, ymin, ymax] = setting.limitRange;
         let scaleRatio = 1 / setting.lineCollisionWidth;
-        if (scaleRatio > 1) { // when x < 1, 1 / x increase vary fast
-            scaleRatio = Math.min(scaleRatio ** 0.5, 10)
-        }
+
         const stencilWidth = Math.round((xmax - xmin) * scaleRatio),
             stencilHeight = Math.round((ymax - ymin) * scaleRatio),
             collideStencil = new Uint8Array(stencilWidth * stencilHeight);
+
         const f = [];
-        for (let i = 0; i < height; i += setting.lineSpacing) {
-            if (i !== clamp(i, ymin, ymax)) continue;
-            for (let j = 0; j < width; j += setting.lineSpacing) {
-                if (j !== clamp(j, xmin, xmax)) continue
+        for (let i = ymin; i < ymax; i += setting.lineSpacing) {
+            for (let j = xmin; j < xmax; j += setting.lineSpacing) {
                 f.push({
                     x: j,
                     y: i,
@@ -602,7 +599,7 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
                     stencilWidth, stencilHeight, scaleRatio,
                     setting.limitRange, rangeChecker
                 );
-                if (points.length > 2) {
+                if (points.length > 3) {
                     result.push(points)
                 }
             }
@@ -627,12 +624,12 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
             if (i && !inRange(curPoint.x, curPoint.y)) break;
             const uv = _vec2.set(...sampler(curPoint.x, curPoint.y));
             const originSpeed = uv.length();
-            uv.multiplyScalar(setting.velocityScale);
-            const speed = uv.length();
+            const speed = originSpeed * setting.velocityScale; //速度缩放
             if (speed < setting.minSpeedThreshold) break;
-            curDir.copy(uv).multiplyScalar(1 / speed);
+            uv.normalize();
+            curDir.copy(uv);
             const nextPoint = _vec2.copy(curPoint).addScaledVector(curDir, setting.segmentLength);
-            time += setting.segmentLength / speed;
+            time += setting.segmentLength / (speed * setting.renderVScale);
             if (i && Math.acos(curDir.dot(lastDir)) > setting.maxTurnAngle) break;
             if (setting.mergeLines) {
                 const [xmin, xmax, ymin, ymax] = limitRange;

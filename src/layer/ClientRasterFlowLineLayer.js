@@ -49,7 +49,7 @@ async function ClientRasterFlowLineLayerBuilder() {
             this.density = 1;
             this.fadeDuration = 100;
             this.lineColor = "white";
-            this.lineLength = 200;
+            this.lineLength = 200; //像素单位
             this.lineSpeed = 10;
             this.lineWidth = 4;
             this.velocityScale = 1;
@@ -229,38 +229,47 @@ async function ClientRasterFlowLineLayerBuilder() {
             const check2 = createVersionChecker('其他');
             const joinCheck = joinChecker(check1, check2);
 
+            /* 基本原理
+            *  1.在矢量栅格上放置若干个点作为路径起始点.
+            *  2.从每个起点开始, 延伸出一条路径.
+            */
             const getSetting = () => {
                 const lineWidth = renderOpts.lineWidth || 1;
                 const {extent, width, height} = this.rasterData;
+                // cell = 矢量栅格单元(像素)
+                const disPerCell = extent.width / width; //一个栅格像素距离
+                const pixelPerCell = Math.min(disPerCell / this.view.state.resolution, 5000);//一个栅格像素等于多少个屏幕像素
 
-                const disPerCell = extent.width / width;
-                const pixelPerCell = disPerCell / this.view.state.resolution;
-                const spacing = 10 / Math.max(pixelPerCell, 1);
-                const lineCellWidth = lineWidth / pixelPerCell;
+                // 动态路径种子放置间距,
+                const spacing = 10 / pixelPerCell;
+                const lineCellWidth = (lineWidth + 2) / pixelPerCell;//线宽对应多少个栅格像素
 
+                //获取view 和 矢量栅格的交集部分, 排除不在视野内的路径种子
                 const limitExtent = this.view.state.extent.clone();
                 const intersect = limitExtent.intersection(extent);
                 if (!intersect) return false;
-                limitExtent.expand(1.2);
+                limitExtent.expand(1.2);//种子不在视野内不代表路径不会流经视野内, 适当扩大可视范围
                 limitExtent.intersection(extent);
                 const xmin = MathUtils.clamp((limitExtent.xmin - extent.xmin) / disPerCell, 0, width);
                 const xmax = MathUtils.clamp((limitExtent.xmax - extent.xmin) / disPerCell, 0, width);
                 const ymin = MathUtils.clamp((extent.ymax - limitExtent.ymax) / disPerCell, 0, height);
                 const ymax = MathUtils.clamp((extent.ymax - limitExtent.ymin) / disPerCell, 0, height);
                 if (xmax === xmin || ymax === ymin) return false;
+                const segmentLength = 10 / Math.max(pixelPerCell, 1); //每次步进长度为屏幕上10个像素
                 return {
-                    density: Math.max(renderOpts.density || 0.01),
-                    fadeDuration: renderOpts.fadeDuration,
-                    lineCollisionWidth: lineCellWidth,
-                    lineSpacing: spacing,
-                    lineSpeed: renderOpts.lineSpeed,
-                    segmentLength: Math.max(lineCellWidth, 1) * 2,
-                    verticesPerLine: Math.round(renderOpts.lineLength / 2 / lineWidth) + 1,
+                    density: Math.max(renderOpts.density || 0.01), //线密度
+                    fadeDuration: renderOpts.fadeDuration, //消失时间
+                    lineCollisionWidth: lineCellWidth, //线碰撞半径(栅格)
+                    lineSpacing: spacing, //间距(栅格)
+                    lineSpeed: renderOpts.lineSpeed, //线速度
+                    segmentLength,
+                    verticesPerLine: Math.round(renderOpts.lineLength / 10) + 2, //线最大顶点数
 
-                    velocityScale: renderOpts.velocityScale || 1,
-                    maxTurnAngle: 1,
-                    mergeLines: true,
-                    minSpeedThreshold: 0.001,
+                    velocityScale: renderOpts.velocityScale || 1, //速度的真实缩放, 用户提供
+                    renderVScale: 1 / Math.max(pixelPerCell, 1), //放大时渲染速度的缩放
+                    maxTurnAngle: 120 / 180 * Math.PI, //最大转角弧度
+                    mergeLines: true, //合并线条
+                    minSpeedThreshold: 0.001, //最小速度阈值
 
                     limitRange: [xmin, xmax, ymin, ymax]
                 }
@@ -284,16 +293,15 @@ async function ClientRasterFlowLineLayerBuilder() {
                 this.layer.fullExtent = extent;
                 return true;
             }
-
             const computeBufferData = async setting => {
-                const res = await this.asyncCreateRasterFlowLineMesh({
-                    data: this.rasterData,
-                    setting: setting
-                });
-                /*const res = this.syncCreateRasterFlowLineMesh({
+                /*const res = await this.asyncCreateRasterFlowLineMesh({
                     data: this.rasterData,
                     setting: setting
                 });*/
+                const res = this.syncCreateRasterFlowLineMesh({
+                    data: this.rasterData,
+                    setting: setting
+                });
                 return res;
             }
             const updateBufferData = ({buffer1, buffer2, buffer3, buffer4}) => {
@@ -379,7 +387,7 @@ async function ClientRasterFlowLineLayerBuilder() {
 
         detach: function () {
             this._handlers.forEach(i => i.remove());
-            this.connect && this.clearWorkerCache().finally(()=>{
+            this.connect && this.clearWorkerCache().finally(() => {
                 this.connect?.close();
                 this.connect = null;
             })
@@ -483,10 +491,11 @@ async function ClientRasterFlowLineLayerBuilder() {
                     min = Math.min(min, l);
                     max = Math.max(max, l);
                 }
-                data.speedRange = [min, max]
+                data.speedRange = [min, max];
             }
+            const maxSpeed = data.speedRange[1];
             const sampler = createSampler(data);
-            const paths = buildRasterPaths(setting, sampler, data.width, data.height);
+            const paths = buildRasterPaths(setting, sampler);
             return toBuffer(paths)
 
             function toBuffer(paths) {
@@ -540,21 +549,19 @@ async function ClientRasterFlowLineLayerBuilder() {
                 }
             }
 
-            function buildRasterPaths(setting, sampler, width, height) {
+            function buildRasterPaths(setting, sampler) {
                 const result = [];
                 const [xmin, xmax, ymin, ymax] = setting.limitRange;
                 let scaleRatio = 1 / setting.lineCollisionWidth;
-                if (scaleRatio > 1) { // when x < 1, 1 / x increase vary fast
-                    scaleRatio = Math.min(scaleRatio ** 0.5, 10)
-                }
+
+                //碰撞检测模板
                 const stencilWidth = Math.round((xmax - xmin) * scaleRatio),
                     stencilHeight = Math.round((ymax - ymin) * scaleRatio),
                     collideStencil = new Uint8Array(stencilWidth * stencilHeight);
+
                 const f = [];
-                for (let i = 0; i < height; i += setting.lineSpacing) {
-                    if (i !== clamp(i, ymin, ymax)) continue;
-                    for (let j = 0; j < width; j += setting.lineSpacing) {
-                        if (j !== clamp(j, xmin, xmax)) continue
+                for (let i = ymin; i <= ymax; i += setting.lineSpacing) {
+                    for (let j = xmin; j <= xmax; j += setting.lineSpacing) {
                         f.push({
                             x: j,
                             y: i,
@@ -562,7 +569,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                         });
                     }
                 }
-                f.sort((a, b) => a.sort - b.sort);
+                f.sort((a, b) => a.sort - b.sort); //shuffle
                 const rangeChecker = createRangeCheck(setting.limitRange);
                 for (const {x, y} of f) {
                     if (Math.random() < setting.density) {
@@ -571,7 +578,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                             stencilWidth, stencilHeight, scaleRatio,
                             setting.limitRange, rangeChecker
                         );
-                        if (points.length > 2) {
+                        if (points.length > 3) {
                             result.push(points)
                         }
                     }
@@ -583,6 +590,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                                startX, startY,
                                stencil, stencilWidth, stencilHeight,
                                scaleRatio, limitRange, inRange) {
+
                 const points = [];
                 let time = 0;
                 const curPoint = new Vector2(startX, startY);
@@ -596,15 +604,15 @@ async function ClientRasterFlowLineLayerBuilder() {
                     speed: _vec2.set(...sampler(startX, startY)).length()
                 });
                 for (let i = 0; i < setting.verticesPerLine; i++) {
-                    if (i && !inRange(curPoint.x, curPoint.y)) break;
+                    if (i && !inRange(curPoint.x, curPoint.y)) break; //超出范围,跳过
                     const uv = _vec2.set(...sampler(curPoint.x, curPoint.y));
-                    const originSpeed = uv.length();
-                    uv.multiplyScalar(setting.velocityScale);
-                    const speed = uv.length();
+                    const originSpeed = uv.length(); //原始速度
+                    const speed = originSpeed * setting.velocityScale; //速度缩放
                     if (speed < setting.minSpeedThreshold) break;
-                    curDir.copy(uv).multiplyScalar(1 / speed);
+                    uv.normalize();
+                    curDir.copy(uv);
                     const nextPoint = _vec2.copy(curPoint).addScaledVector(curDir, setting.segmentLength);
-                    time += setting.segmentLength / speed;
+                    time += setting.segmentLength / (speed * setting.renderVScale);
                     if (i && Math.acos(curDir.dot(lastDir)) > setting.maxTurnAngle) break;
                     if (setting.mergeLines) {
                         const [xmin, xmax, ymin, ymax] = limitRange;
@@ -612,7 +620,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                         const y = Math.round((nextPoint.y - ymin) * scaleRatio);
                         if (x < 0 || x > stencilWidth - 1 || y < 0 || y > stencilHeight - 1) break;
                         let stencilVal = stencil[y * stencilWidth + x];
-                        if (stencilVal > 0) break;
+                        if (stencilVal === 1) break;
                         stencil[y * stencilWidth + x] = 1;
                     }
                     points.push({
@@ -627,6 +635,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 return points
             }
 
+            //双线性插值
             function createSampler(data) {
                 const {width, height, data: arr, noDataValue} = data;
                 //  00————————10  ——— X
@@ -636,7 +645,6 @@ async function ClientRasterFlowLineLayerBuilder() {
                 //  01————————11
                 //  |
                 //  Y
-                //bilinear interpolation
                 return (x, y) => {
                     const p00 = new Vector2(x, y).floor();
                     if (p00.x < 0 || p00.x >= width || p00.y < 0 || p00.y >= height) return [0, 0];

@@ -136,19 +136,19 @@ export default {
             folder.add(flowParams, 'density', 0.01, 1.0).step(0.01).onChange((v) => {
                 layer.renderOpts.density = v;
             })
-            folder.add(flowParams, 'fadeDuration', 0.0, 200).step(1).onChange((v) => {
+            folder.add(flowParams, 'fadeDuration', 0.0, 2000).step(1).onChange((v) => {
                 layer.renderOpts.fadeDuration = v;
             })
-            folder.add(flowParams, 'lineLength', 1, 400).step(1).onChange((v) => {
+            folder.add(flowParams, 'lineLength', 1, 1000).step(1).onChange((v) => {
                 layer.renderOpts.lineLength = v;
             })
-            folder.add(flowParams, 'lineSpeed', 1, 100).step(1).onChange((v) => {
+            folder.add(flowParams, 'lineSpeed', 1, 1000).step(1).onChange((v) => {
                 layer.renderOpts.lineSpeed = v;
             })
             folder.add(flowParams, 'lineWidth', 1, 10).step(0.1).onChange((v) => {
                 layer.renderOpts.lineWidth = v;
             })
-            folder.add(flowParams, 'velocityScale', 1, 100).step(0.1).onChange((v) => {
+            folder.add(flowParams, 'velocityScale', 1, 1000).step(0.1).onChange((v) => {
                 layer.renderOpts.velocityScale = v;
             });
             folder.add(flowParams, 'useColorRamp').onChange(v => {
