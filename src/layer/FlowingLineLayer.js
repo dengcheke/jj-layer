@@ -133,7 +133,7 @@ async function FlowingLineLayerBuilder() {
                 const graphics = this.layer.graphics.items;
                 const viewSR = this.view.spatialReference;
                 {
-                    this.layer.fullExtent = null;
+                    //this.layer.fullExtent = null;
                     this.fullExtent = null;
                     this.updateFlags.clear();
                     this.meshes = null;

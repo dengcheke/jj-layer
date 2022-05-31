@@ -201,7 +201,7 @@ async function ClientVectorFieldLayerBuilder() {
             const dataHandle = () => {
                 if (this.destroyed) return;
                 this.dataset = null;
-                layer.fullExtent = null;
+                //layer.fullExtent = null;
                 this.fullExtent = null;
 
                 let data = layer.data;

@@ -156,7 +156,7 @@ async function DataSeriesGraphicsLayerBuilder() {
                 const graphics = this.layer.graphics.items;
                 const viewSR = this.view.spatialReference;
                 {
-                    this.layer.fullExtent = this.fullExtent = null;
+                    this.fullExtent = null;
                     this.meshes = null;
                     this.updateFlags.clear();
                     visibleWatcher?.remove();

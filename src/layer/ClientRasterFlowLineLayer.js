@@ -334,7 +334,7 @@ async function ClientRasterFlowLineLayerBuilder() {
                 this.clearWorkerCache();
                 this.rasterData = null;
                 this.hasData = false;
-                this.layer.fullExtent = null;
+                //this.layer.fullExtent = null;
                 check1(processData())
                     .then(flag => flag && reCalcBuffer())
                     .catch(versionErrCatch)

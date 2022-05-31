@@ -138,7 +138,7 @@ async function ClientRasterColormapLayerBuilder() {
                 if (this.destroyed) return;
 
                 this.fullExtent = null;
-                layer.fullExtent = null;
+                //layer.fullExtent = null;
                 this.dataset = null;
 
                 let data = layer.data;
