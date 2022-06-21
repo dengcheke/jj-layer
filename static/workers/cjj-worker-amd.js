@@ -209,7 +209,7 @@ define([
                 console.warn(`path's point length < 2, ignored`);
                 return null;
             }
-            const vertices = [], indices = [], segaments = [];
+            const vertices = [], indices = [], groups = [];
             // 0       1     2
             // before  cur  after
             const state = {
@@ -230,8 +230,7 @@ define([
                     v2.normalize();
                     state.d12.copy(v2);
                     state.n12.set(-v2.y, v2.x); // ccw 90
-
-                    segaments.push([
+                    groups.push([
                         {
                             x: cur[0],
                             y: cur[1],
@@ -239,7 +238,8 @@ define([
                             yOffset: state.n12.y,
                             distance: state.distance,
                             disWidthDelta: 0,//拐角圆弧的距离插值数, 以半宽度为基准
-                            side: 1
+                            side: 1,
+                            index: i
                         },
                         {
                             x: cur[0],
@@ -248,12 +248,13 @@ define([
                             yOffset: -state.n12.y,
                             distance: state.distance,
                             disWidthDelta: 0,
-                            side: -1
+                            side: -1,
+                            index: i
                         }
                     ]);
                 } else if (!after) {
                     const {distance, n01} = state;
-                    segaments.push([
+                    groups.push([
                         {
                             x: cur[0],
                             y: cur[1],
@@ -261,7 +262,8 @@ define([
                             yOffset: n01.y,
                             distance: distance,
                             disWidthDelta: 0,
-                            side: 1
+                            side: 1,
+                            index: i
                         },
                         {
                             x: cur[0],
@@ -270,7 +272,8 @@ define([
                             yOffset: -n01.y,
                             distance: distance,
                             disWidthDelta: 0,
-                            side: -1
+                            side: -1,
+                            index: i
                         }
                     ]);
                 } else {
@@ -298,6 +301,7 @@ define([
                             cw: true,
                             n01: n01.clone(),
                             n12: n12.clone(),
+                            index: i,
                         }
                         p0 = {
                             x: cur[0],
@@ -306,7 +310,8 @@ define([
                             yOffset: v2.y + n01.y * 2,
                             distance: distance,
                             disWidthDelta: -disWidthDelta,
-                            side: 1
+                            side: 1,
+                            index: i,
                         }
                         p2 = {
                             x: cur[0],
@@ -315,7 +320,8 @@ define([
                             yOffset: v2.y + n12.y * 2,
                             distance: distance,
                             disWidthDelta: +disWidthDelta,
-                            side: 1
+                            side: 1,
+                            index: i
                         }
                     } else {
                         p1 = {
@@ -329,6 +335,7 @@ define([
                             cw: false,
                             n01: n01.clone(),
                             n12: n12.clone(),
+                            index: i,
                         }
                         p0 = {
                             x: cur[0],
@@ -337,7 +344,8 @@ define([
                             yOffset: v2.y - 2 * n01.y,
                             distance: distance,
                             disWidthDelta: -disWidthDelta,
-                            side: -1
+                            side: -1,
+                            index: i,
                         }
                         p2 = {
                             x: cur[0],
@@ -346,10 +354,11 @@ define([
                             yOffset: v2.y - 2 * n12.y,
                             distance: distance,
                             disWidthDelta: disWidthDelta,
-                            side: -1
+                            side: -1,
+                            index: i,
                         }
                     }
-                    segaments.push([p0, p1, p2]);
+                    groups.push([p0, p1, p2]);
                 }
                 //update state
                 state.distance += state.l12;
@@ -358,9 +367,9 @@ define([
                 state.d01.copy(state.d12);
                 state.n01.copy(state.n12);
             }
-            while (segaments.length) {
-                const pArr0 = segaments.shift();
-                const pArr1 = segaments.shift();
+            while (groups.length) {
+                const pArr0 = groups.shift();
+                const pArr1 = groups.shift();
                 if (pArr1.length === 2) {
                     const l = vertices.length;
                     vertices.push(pArr0[0], pArr0[1], pArr1[0], pArr1[1]);
@@ -408,7 +417,7 @@ define([
                     }
                     const v = [{...p1, disWidthDelta: p2.disWidthDelta}, p2];
                     cw && v.reverse();
-                    segaments.unshift(v);
+                    groups.unshift(v);
                 }
             }
 

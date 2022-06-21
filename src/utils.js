@@ -30,7 +30,7 @@ export function convertDataTextureBuffer(data, totalLen) {
 }
 
 //满足给定长度的最小的纹理尺寸, 宽高均为2的幂,且宽高之间差值最小。
-export function calcDataTexSize(len){
+export function calcDataTexSize(len) {
     if (!len) {
         return null;
     } else {
@@ -149,7 +149,7 @@ const {canvas, ctx} = /*#__PURE__*/ (() => {
     return {canvas, ctx}
 })()
 
-export function genColorRamp(s, w, h) {
+export function genColorRamp(s, w, h, type = 'img') {
     canvas.height = parseInt(h) || 1;
     canvas.width = parseInt(w) || 128;
     let stops = [...s].sort((a, b) => a.value - b.value);
@@ -161,7 +161,7 @@ export function genColorRamp(s, w, h) {
     }
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('png');
+    return type === 'img' ? canvas.toDataURL('png') : ctx.getImageData(0, 0, w, h).data;
 }
 
 export function getRenderTarget(version) {
@@ -192,4 +192,12 @@ export async function sleep(t) {
     return new Promise((res, rej) => {
         setTimeout(() => res(), t);
     })
+}
+
+export function isNil(v){
+    return v === undefined || v === null
+}
+
+export function parseValueNotNil(v, defaultValue) {
+    return isNil(v) ? defaultValue : v;
 }

@@ -17,17 +17,17 @@ export default {
     },
     async mounted() {
         const container = this.$el;
-        const {map, view,GraphicsLayer} = await this.initMap(container);
+        const {map, view, GraphicsLayer} = await this.initMap(container);
         const baseLayer = await this.loadCustomLy();
         map.add(baseLayer);
         const gl = new GraphicsLayer();
         gl.add({
-            attributes:{},
+            attributes: {},
             geometry: {
-                type:"point",
-                x:0,
-                y:0,
-                spatialReference:{wkid:4326}
+                type: "point",
+                x: 0,
+                y: 0,
+                spatialReference: {wkid: 4326}
             }
         })
         map.add(gl)
@@ -55,7 +55,7 @@ export default {
     methods: {
         async initMap(container) {
             const [Map, MapView, GraphicsLayer] = await loadModules([
-                "esri/Map", "esri/views/MapView","esri/layers/GraphicsLayer"
+                "esri/Map", "esri/views/MapView", "esri/layers/GraphicsLayer"
             ]);
             const map = new Map({
                 basemap: "dark-gray-vector",
@@ -73,18 +73,22 @@ export default {
                 scale: 200000,
                 spatialReference: {wkid: 3857}
             });
-            return {map, view,GraphicsLayer}
+            return {map, view, GraphicsLayer}
         },
         async loadCustomLy() {
-            const {data} = await axios.get(STATIC_URL +'test-line.json');
+            const {data} = await axios.get(STATIC_URL + 'test-line.json');
             const ly = await this.$layerLoaders.loadFlowingLineLayer({
                 id: this.layerId,
                 graphics: data.features.map((item, idx) => {
                     const g = {
-                        attributes: {
-                            ...item.properties,
+                        attributes: item.properties,
+                        lineStyle:{
                             color: 'rgb(50, 120, 240)' || '#' + ('000000' + (Math.random() * 0x1000000 >> 0).toString(16)).slice(-7, -1),
+                            flow: Math.random() > 0.5,
                         },
+                        vertexValue: [
+                            new Array(item.geometry.coordinates.length).fill(0).map(() => Math.random() * 100)
+                        ],
                         geometry: {
                             paths: [
                                 item.geometry.coordinates
@@ -93,11 +97,29 @@ export default {
                             spatialReference: {
                                 wkid: 4326
                             }
-                        }
+                        },
                     };
                     return g;
-                })
+                }),
+                renderOpts: {
+                    vertexColor: {
+                        valueRange: [0, 100],
+                        colorStops: [
+                            {value: 0, color: 'red'},
+                            {value: 1/9, color: 'orange'},
+                            {value: 2/9, color: 'yellow'},
+                            {value: 3/9, color: 'green'},
+                            {value: 4/9, color: 'blue'},
+                            {value: 5/9, color: 'indigo'},
+                            {value: 6/9, color: 'purple'},
+                            {value: 7/9, color: 'orange'},
+                            {value: 8/9, color: 'yellow'},
+                            {value: 1, color: 'green'},
+                        ]
+                    }
+                }
             });
+            console.log(ly)
             return ly
         }
 
@@ -105,7 +127,7 @@ export default {
 }
 </script>
 
-<style scoped lang="less">
+<style lang="less" scoped>
 .map-wrapper.base {
     height: 100%;
     width: 100%;

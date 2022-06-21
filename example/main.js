@@ -21,7 +21,7 @@ import {
     loadClientRasterColormapLayer,
     loadTip3DLayer,
     loadFlowingLineLayer
-} from "../dist/cjs";
+} from "../src";
 
 Vue.prototype.$layerLoaders = {
     loadDataSeriesTINMeshLayer,

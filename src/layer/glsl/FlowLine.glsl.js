@@ -16,13 +16,14 @@ export const FlowLineVertexShader = `
     attribute float a_width;
     attribute vec4 a_color;
     attribute vec4 a_pick_color;
-    attribute float a_visible;
+    attribute vec2 a_visible_flow;
     
     varying vec4 v_color;
     varying float v_side;
     varying float v_dis_percent;
     varying float v_visible;
     varying float v_halfWidth;
+    varying float v_flow;
     void main() {
         float halfWidth = a_width * 0.5;
         vec2 position = (a_position.xy - u_center.xy) + (a_position.zw - u_center.zw);
@@ -34,7 +35,8 @@ export const FlowLineVertexShader = `
         v_dis_percent = (a_distance + a_distance_width_delta * halfWidth * u_resolution) / a_totalDis;
         v_side = a_side;
         v_color = u_isPick ? a_pick_color : a_color;
-        v_visible = a_visible;
+        v_visible = a_visible_flow.x;
+        v_flow = a_visible_flow.y;
         v_halfWidth = halfWidth;
     }
 `
@@ -55,15 +57,17 @@ export const FlowLineFragShader = `
     varying float v_dis_percent;
     varying float v_visible;
     varying float v_halfWidth;
+    varying float v_flow;
     
     void main() {
        if(v_visible != 1.0) discard;
        float alpha = 1.0;
        if(!u_isPick){
-           float dis = mod(mod( v_dis_percent - u_time * u_trail.speed, u_trail.cycle) + u_trail.cycle, u_trail.cycle);
-           bool isTrail = (dis >= 0.0 && dis < u_trail.length);
-           alpha = isTrail ? clamp(alpha * dis / u_trail.length, u_trail.minAlpha, 1.0) : u_trail.minAlpha;
-           
+           if(v_flow == 1.0){
+               float dis = mod(mod(v_dis_percent - u_time * u_trail.speed, u_trail.cycle) + u_trail.cycle, u_trail.cycle);
+               bool isTrail = (dis >= 0.0 && dis < u_trail.length);
+               alpha = isTrail ? clamp(alpha * dis / u_trail.length, u_trail.minAlpha, 1.0) : u_trail.minAlpha;
+           }
            float edgeStart = 1.0 - 2.0 / v_halfWidth;
            alpha *= step(0.0, edgeStart) * (1.0 - smoothstep(edgeStart, 1.0, abs(v_side)));
        }

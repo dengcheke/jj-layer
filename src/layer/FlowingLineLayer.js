@@ -1,4 +1,14 @@
-import {createVersionChecker, doubleToTwoFloats, getRenderTarget, id2RGBA, RGBA2Id, versionErrCatch} from "@src/utils";
+import {
+    createVersionChecker,
+    doubleToTwoFloats,
+    genColorRamp,
+    getRenderTarget,
+    id2RGBA,
+    isNil,
+    parseValueNotNil,
+    RGBA2Id,
+    versionErrCatch
+} from "@src/utils";
 import {
     BufferGeometry,
     CustomBlending,
@@ -60,23 +70,58 @@ async function FlowingLineLayerBuilder() {
             this.speed = DEFAULT_CONFIG.speed;
             this.length = DEFAULT_CONFIG.length;
             this.cycle = DEFAULT_CONFIG.cycle;
+            this.color = DEFAULT_CONFIG.color;
+            this.width = DEFAULT_CONFIG.width;
+            this.flow = true;
+            /*
+            是否使用顶点颜色, 每个顶点一个额外的值, 按照值范围进行颜色映射,
+            数据必须与geometry一一对应, 附加在graphic.vertexColor(直接指定颜色) / vertexValue(指定数值,映射)属性上
+            {
+                geometry: [
+                    [ [p1x, p1y], [p2x, p2y], ... ] , //paths1
+                    [ [p1x, p1y], [p2x, p2y], ... ] , //paths2
+                    ....
+                ],
+                //则顶点颜色数据为:
+                vertexValue: [
+                    [ p1v, p2v, p3v, ... ],  // paths1
+                    [ p1v, p2v, p3v, ... ],  // paths2
+                    ....
+                ],
+                //或者直接给出顶点颜色, 数组[r,g,b,a] / 字符串颜色
+                vertexColor:[
+                    [ [p1r,g,b,a], "white", "#fffff", ...] //paths1,
+                    ....
+                ]
+            }
+            */
+            // { colorStops:[], valueRange:[]} 有一部分使用 vertexValue
+            // true  全部使用vertexColor
+            // falsy 不使用顶点颜色 null, undefine ...
+            this.vertexColor = null;
         },
         properties: {
+            flow: {},
             minAlpha: {},
             length: {},
             speed: {},
             cycle: {},
+            color: {},
+            width: {},
+            vertexColor: {},
         }
     });
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
             this._handlers = [];
 
+            this.useVertexColor = false;
+            this.colorRamp = null;
+
+            this.isFlow = true;
+
             this.fullExtent = null;
             this.meshes = null;
-
-            this.defaultColor = new Color(DEFAULT_CONFIG.color);
-            this.defaultWidth = DEFAULT_CONFIG.width;
 
             this.updateFlags = new Set();
         },
@@ -112,7 +157,7 @@ async function FlowingLineLayerBuilder() {
                         }
                     },
                     u_time: {value: performance.now()},
-                    u_isPick: {value: false}
+                    u_isPick: {value: false},
                 },
                 vertexShader: FlowLineVertexShader,
                 fragmentShader: FlowLineFragShader,
@@ -169,7 +214,6 @@ async function FlowingLineLayerBuilder() {
                         }
                         return {
                             mesh,
-                            attributes: g.attributes || {},
                             pickId: idx + 1,
                             graphic: g
                         }
@@ -197,11 +241,84 @@ async function FlowingLineLayerBuilder() {
                     this.requestRender();
                 }).catch(versionErrCatch)
             };
+
+            function createVisibleWatcher(graphics) {
+                const offs = graphics.map(g => g.watch('visible', () => {
+                    self.updateFlags.add(Flags.appear);
+                    self.requestRender();
+                }))
+                return {
+                    remove: () => {
+                        offs.forEach(h => h.remove())
+                    }
+                }
+            }
+
             this._handlers.push(watchUtils.on(this,
                 "layer.graphics", "change",
                 handleDataChange, handleDataChange
             ));
-            this._handlers.push(this.layer.renderOpts.watch(["minAlpha", "length", "speed", "cycle"], () => this.requestRender()))
+
+
+            const renderOpts = this.layer.renderOpts;
+            this._handlers.push(renderOpts.watch(["minAlpha", "length", "speed", "cycle", "flow"], (newV, oldV, key) => {
+                if (key === "minAlpha") {
+                    if (newV >= 1) {
+                        this.isFlow = false;
+                    } else {
+                        this.isFlow = !!renderOpts.flow;
+                    }
+                }
+                if (key === 'flow') {
+                    this.isFlow = !!newV;
+                }
+                this.requestRender()
+            }));
+            this._handlers.push(renderOpts.watch(["color", "width"], () => {
+                this.updateFlags.add(Flags.appear);
+                this.requestRender();
+            }));
+            const vertexColorHandler = (v) => {
+                let oldUse = this.useVertexColor;
+                if (!v) {
+                    this.useVertexColor = false;
+                    oldUse && this.updateFlags.add(Flags.appear);
+                    this.requestRender();
+                } else {
+                    if (v === true) {
+                        this.useVertexColor = true;
+                        this.colorRamp = () => {
+                            console.warn(`flowLine: renderOpts.vertexColor值为true, 但是未指定vertexColor属性! 回退到renderOpts.color`)
+                            return renderOpts.color;
+                        }
+                        this.updateFlags.add(Flags.appear);
+                        this.requestRender();
+                        return;
+                    }
+                    const {valueRange, colorStops} = v;
+                    if (Array.isArray(valueRange) && Array.isArray(colorStops)) {
+                        const buffer = genColorRamp(colorStops, 256, 1, 'buffer');
+                        this.colorRamp = v => {
+                            const i = (MathUtils.clamp(v, 0, 1) * 255 >> 0) * 4;
+                            return {
+                                r: buffer[i], //r
+                                g: buffer[i + 1], //g
+                                b: buffer[i + 2], //b
+                                a: buffer[i + 3], //a
+                            }
+                        }
+                        this.updateFlags.add(Flags.appear);
+                        this.useVertexColor = true;
+                        this.requestRender();
+                    } else {
+                        this.useVertexColor = false;
+                        oldUse && this.updateFlags.add(Flags.appear);
+                        this.requestRender();
+                        throw new Error('flowline.renderOpts参数vertexColor格式不对,必须是:{valueRange:[], colorStops:[]} / true / falsy');
+                    }
+                }
+            }
+            this._handlers.push(renderOpts.watch('vertexColor', vertexColorHandler));
             this._handlers.push({
                 remove: () => {
                     visibleWatcher?.remove();
@@ -215,19 +332,9 @@ async function FlowingLineLayerBuilder() {
                     this.camera = null;
                     this.renderer = null;
                 }
-            })
+            });
 
-            function createVisibleWatcher(graphics) {
-                const offs = graphics.map(g => g.watch('visible', () => {
-                    self.updateFlags.add(Flags.appear);
-                    self.requestRender();
-                }))
-                return {
-                    remove: () => {
-                        offs.forEach(h => h.remove())
-                    }
-                }
-            }
+            renderOpts.vertexColor && vertexColorHandler(renderOpts.vertexColor);
         },
 
         detach: function () {
@@ -256,12 +363,21 @@ async function FlowingLineLayerBuilder() {
             renderer.setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
             renderer.render(lineMesh, camera);
-            this.requestRender()
+            this.isFlow && this.requestRender()
         },
 
         updateBufferData: function () {
             if (this.destroyed || !this.updateFlags.size) return;
-            const {lineMesh} = this;
+            const {lineMesh, layer, useVertexColor, colorRamp: getPointColor} = this;
+            const [min, max, r] = (() => {
+                if (useVertexColor) {
+                    const range = layer.renderOpts.vertexColor.valueRange;
+                    return [range[0], range[1], range[1] - range[0]]
+                } else {
+                    return []
+                }
+            })();
+            const {renderOpts} = layer;
 
             const dataChange = this.updateFlags.has(Flags.data),
                 appearChange = dataChange || this.updateFlags.has(Flags.appear);
@@ -280,7 +396,7 @@ async function FlowingLineLayerBuilder() {
                     ['a_width', Float32BufferAttribute, Float32Array, 1, false],
                     ['a_color', Uint8ClampedBufferAttribute, Uint8ClampedArray, 4, true],
                     ['a_pick_color', Uint8ClampedBufferAttribute, Uint8ClampedArray, 4, true],
-                    ['a_visible', Uint8ClampedBufferAttribute, Uint8ClampedArray, 1, false],
+                    ['a_visible_flow', Uint8ClampedBufferAttribute, Uint8ClampedArray, 2, false],
                 ].map(([name, ctor, typeArr, itemSize, normalized]) => {
                     geometry.setAttribute(
                         name,
@@ -297,7 +413,7 @@ async function FlowingLineLayerBuilder() {
             const sideBuf = geometry.getAttribute('a_side').array;
             const widthBuf = geometry.getAttribute('a_width').array;
             const colorBuf = geometry.getAttribute('a_color').array;
-            const visibleBuf = geometry.getAttribute('a_visible').array;
+            const visibleFlowBuf = geometry.getAttribute('a_visible_flow').array;
             const pickColorBuf = geometry.getAttribute('a_pick_color').array;
 
             const indexData = new Array(indexCount);
@@ -308,13 +424,16 @@ async function FlowingLineLayerBuilder() {
             //graphic
             for (let meshIndex = 0; meshIndex < this.meshes.length; ++meshIndex) {
                 const item = this.meshes[meshIndex];
-                const {mesh, attributes, pickId, graphic} = item,
-                    pickColor = dataChange ? id2RGBA(pickId) : null;
-                const visible = graphic.visible ? 1.0 : 0.0;
-                const width = attributes.width || this.defaultWidth;
-                const color = appearChange
-                    ? new Color(attributes.color || this.defaultColor)
-                    : null
+                const {mesh, pickId, graphic} = item,
+                    lineStyle = graphic.lineStyle || {},
+                    pickColor = dataChange ? id2RGBA(pickId) : null,
+                    vertexColor = graphic.vertexColor,
+                    vertexValue = graphic.vertexValue;
+                const visible = graphic.visible ? 1 : 0;
+                const flow = parseValueNotNil(lineStyle.flow, !!renderOpts.flow) ? 1 : 0;
+                const width = lineStyle.width || renderOpts.width || 1;
+                const lineColor = appearChange ? new Color(lineStyle.color || renderOpts.color) : null
+                lineColor && (lineColor.a *= 255);
                 //subpath
                 for (let pathIdx = 0; pathIdx < mesh.length; pathIdx++) {
                     const {indices, vertices, totalDis} = mesh[pathIdx];
@@ -332,8 +451,9 @@ async function FlowingLineLayerBuilder() {
                             c42 = c4 + 2,
                             c43 = c4 + 3;
 
+                        const v = vertices[i];
                         if (dataChange) {
-                            const v = vertices[i], {x, y} = v;
+                            const {x, y} = v;
                             const [hx, lx] = doubleToTwoFloats(x);
                             const [hy, ly] = doubleToTwoFloats(y);
                             posBuf[c4] = hx;
@@ -359,12 +479,30 @@ async function FlowingLineLayerBuilder() {
                         if (appearChange) {
                             widthBuf[currentVertex] = width;
 
-                            colorBuf[c4] = color.r;
-                            colorBuf[c41] = color.g;
-                            colorBuf[c42] = color.b;
-                            colorBuf[c43] = color.a * 255;
+                            let _color = lineColor;
 
-                            visibleBuf[currentVertex] = visible;
+                            if (useVertexColor) {
+                                if (vertexColor) {
+                                    const value = vertexColor[pathIdx]?.[v.index];
+                                    if (!isNil(value)) {
+                                        _color = new Color(value);
+                                        _color.a *= 255;
+                                    }
+                                } else {
+                                    const value = vertexValue?.[pathIdx]?.[v.index];
+                                    if (!isNil(value) && !isNaN(value)) {
+                                        _color = getPointColor(MathUtils.clamp((value - min) / r, 0, 1));
+                                    }
+                                }
+                            }
+
+                            colorBuf[c4] = _color.r;
+                            colorBuf[c41] = _color.g;
+                            colorBuf[c42] = _color.b;
+                            colorBuf[c43] = _color.a;
+
+                            visibleFlowBuf[c2] = visible;
+                            visibleFlowBuf[c2 + 1] = flow;
                         }
 
                         currentVertex++;
@@ -378,13 +516,14 @@ async function FlowingLineLayerBuilder() {
                 }
             }
             if (appearChange) {
-                ['a_width', 'a_color', 'a_visible'].map(name => {
+                ['a_width', 'a_color', 'a_visible_flow'].map(name => {
                     geometry.getAttribute(name).needsUpdate = true;
                 })
             }
 
             dataChange && geometry.setIndex(indexData);
             this.updateFlags.clear();
+            return true;
         },
 
         updateRenderParams(state) {
@@ -423,7 +562,7 @@ async function FlowingLineLayerBuilder() {
             const [hx, lx] = doubleToTwoFloats(state.center[0]);
             const [hy, ly] = doubleToTwoFloats(state.center[1]);
             uniform.u_trail.value = {
-                minAlpha: MathUtils.clamp(+trail.minAlpha, 0, 1),
+                minAlpha: this.isFlow ? MathUtils.clamp(+trail.minAlpha, 0, 1) : 1.0,
                 length: MathUtils.clamp(+trail.length, 0, 1),
                 speed: MathUtils.clamp(+trail.speed, 0, 1),
                 cycle: MathUtils.clamp(+trail.cycle, 0, 1),

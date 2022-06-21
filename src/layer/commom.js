@@ -8,7 +8,7 @@ import {
     versionErrCatch
 } from "@src/utils";
 
-export const WORKER_PATH = 'customWorkers/cjj-worker'
+export const WORKER_PATH = 'customWorkers/cjj-worker-amd'
 
 
 /***data-series***/
