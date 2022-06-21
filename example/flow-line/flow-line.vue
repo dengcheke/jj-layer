@@ -84,7 +84,12 @@ export default {
                         attributes: item.properties,
                         lineStyle:{
                             color: 'rgb(50, 120, 240)' || '#' + ('000000' + (Math.random() * 0x1000000 >> 0).toString(16)).slice(-7, -1),
-                            flow: Math.random() > 0.5,
+                            //flow: Math.random() > 0.5,
+                            width: 8,
+                            minAlpha: 0.1,
+                            speed: 0.2,
+                            length: 0.35,
+                            cycle: 0.5,
                         },
                         vertexValue: [
                             new Array(item.geometry.coordinates.length).fill(0).map(() => Math.random() * 100)

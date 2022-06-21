@@ -9,21 +9,21 @@ export const FlowLineVertexShader = `
     
     attribute vec4 a_position;
     attribute vec2 a_offset;
-    attribute float a_distance;
-    attribute float a_totalDis;
-    attribute float a_distance_width_delta;
-    attribute float a_side;
+    
+    attribute vec4 a_dis_info; // [distance, totalDis, distance_width_delta, side]
+    
     attribute float a_width;
     attribute vec4 a_color;
     attribute vec4 a_pick_color;
-    attribute vec2 a_visible_flow;
+    attribute float a_visible;
+    attribute vec4 a_trail; // [minAlpha, speed, length, cycle]
     
     varying vec4 v_color;
     varying float v_side;
     varying float v_dis_percent;
     varying float v_visible;
     varying float v_halfWidth;
-    varying float v_flow;
+    varying vec4 v_trail;
     void main() {
         float halfWidth = a_width * 0.5;
         vec2 position = (a_position.xy - u_center.xy) + (a_position.zw - u_center.zw);
@@ -32,42 +32,45 @@ export const FlowLineVertexShader = `
         gl_Position.xy = (u_display * (u_transform * vec3(position, 1.0) + offset)).xy;
         gl_Position.zw = vec2(0.0, 1.0);
 
-        v_dis_percent = (a_distance + a_distance_width_delta * halfWidth * u_resolution) / a_totalDis;
-        v_side = a_side;
+        
+        //[distance, totalDis, distance_width_delta, side]
+
+        v_dis_percent = (a_dis_info.x + a_dis_info.z * halfWidth * u_resolution) / a_dis_info.y;
+        v_side = a_dis_info.w;
         v_color = u_isPick ? a_pick_color : a_color;
-        v_visible = a_visible_flow.x;
-        v_flow = a_visible_flow.y;
+        v_visible = a_visible;
         v_halfWidth = halfWidth;
+        v_trail = a_trail;
     }
 `
 export const FlowLineFragShader = `
     precision highp float;
-    struct trail {
-        float speed;
-        float length;
-        float cycle;
-        float minAlpha;
-    };
+
     uniform bool u_isPick;
     uniform float u_time;
-    uniform trail u_trail;
-    
+
     varying vec4 v_color;
     varying float v_side;
     varying float v_dis_percent;
     varying float v_visible;
     varying float v_halfWidth;
-    varying float v_flow;
+    varying vec4 v_trail;
     
     void main() {
        if(v_visible != 1.0) discard;
        float alpha = 1.0;
+       
+       //[minAlpha, speed, length, cycle]
+       float minAlpha = v_trail.x;
+       float speed = v_trail.y;
+       float length = v_trail.z;
+       float cycle = v_trail.w;
+       
        if(!u_isPick){
-           if(v_flow == 1.0){
-               float dis = mod(mod(v_dis_percent - u_time * u_trail.speed, u_trail.cycle) + u_trail.cycle, u_trail.cycle);
-               bool isTrail = (dis >= 0.0 && dis < u_trail.length);
-               alpha = isTrail ? clamp(alpha * dis / u_trail.length, u_trail.minAlpha, 1.0) : u_trail.minAlpha;
-           }
+           float dis = mod(mod(v_dis_percent - u_time * speed, cycle) + cycle, cycle);
+           bool isTrail = (dis >= 0.0 && dis < length);
+           alpha = isTrail ? clamp(alpha * dis / length, minAlpha, 1.0) : minAlpha;
+
            float edgeStart = 1.0 - 2.0 / v_halfWidth;
            alpha *= step(0.0, edgeStart) * (1.0 - smoothstep(edgeStart, 1.0, abs(v_side)));
        }
