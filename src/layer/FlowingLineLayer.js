@@ -11,7 +11,7 @@ import {
 } from "@src/utils";
 import {
     BufferGeometry,
-    CustomBlending,
+    CustomBlending, DoubleSide,
     Float32BufferAttribute,
     MathUtils,
     Matrix3,

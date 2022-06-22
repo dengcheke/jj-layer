@@ -32,7 +32,6 @@ export const FlowLineVertexShader = `
         gl_Position.xy = (u_display * (u_transform * vec3(position, 1.0) + offset)).xy;
         gl_Position.zw = vec2(0.0, 1.0);
 
-        
         //[distance, totalDis, distance_width_delta, side]
 
         v_dis_percent = (a_dis_info.x + a_dis_info.z * halfWidth * u_resolution) / a_dis_info.y;

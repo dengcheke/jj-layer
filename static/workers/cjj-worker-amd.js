@@ -198,8 +198,7 @@ define([
         }
     }
 
-    const RadToDeg = 180 / Math.PI;
-
+    const SplitPerAngle = 15 / 180 * Math.PI;
     function tessellateLineRound(geometry) {
         if (geometry.type.toLowerCase() !== 'polyline') throw new Error('geometry type is not polyline');
         return geometry.paths.map(_tessellatePath);
@@ -209,250 +208,265 @@ define([
                 console.warn(`path's point length < 2, ignored`);
                 return null;
             }
-            const vertices = [], indices = [], groups = [];
-            // 0       1     2
-            // before  cur  after
-            const state = {
-                distance: 0,
-                d01: new Vector2(), //direction
-                d12: new Vector2(),
-                n01: new Vector2(), // normal
-                n12: new Vector2(),
-                l01: 0, // length
-                l12: 0,
-            }
-            const v2 = new Vector2();
-            for (let i = 0; i < path.length; i++) {
-                let before = path[i - 1], cur = path[i], after = path[i + 1];
-                if (!before) {
-                    v2.set(after[0] - cur[0], after[1] - cur[1])
-                    state.l12 = v2.length();
-                    v2.normalize();
-                    state.d12.copy(v2);
-                    state.n12.set(-v2.y, v2.x); // ccw 90
-                    groups.push([
-                        {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: state.n12.x,
-                            yOffset: state.n12.y,
-                            distance: state.distance,
-                            disWidthDelta: 0,//拐角圆弧的距离插值数, 以半宽度为基准
-                            side: 1,
-                            index: i
+
+            let vertices = [], indices = [], ctxs = [];
+            let totalLength = 0; //总长度
+            let vertexCount = (path.length - 1) * 4; //顶点数
+            let indexCount = (path.length - 1) * 6; //索引数
+            //计算布局信息
+            {
+                //逆时针旋转90 为 side=1
+                const lastDir = new Vector2(); //上一个方向
+                const n1 = new Vector2(),
+                    n2 = new Vector2(),
+                    curDir = new Vector2(), //当前方向
+                    curPoint = new Vector2(), //当前点
+                    nextPoint = new Vector2(), //下一个点
+                    offset = new Vector2(), //当前offset
+                    c0 = new Vector2(), //拐角圆心offset
+                    c1 = new Vector2(), //拐角圆弧起点offset
+                    c2 = new Vector2(), //拐角圆弧终点offset;
+                    temp = new Vector2();
+
+                //for first point
+                {
+                    lastDir.set(path[1][0] - path[0][0], path[1][1] - path[0][1]);
+                    totalLength += lastDir.length();
+                    lastDir.normalize();
+                    offset.set(-lastDir.y, lastDir.x);
+                    ctxs.push({
+                        isCw: true,//顺时针
+                        common: {
+                            x: path[0][0],
+                            y: path[0][1],
+                            len: 0, //长度
+                            index: 0, //原始点索引
                         },
-                        {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: -state.n12.x,
-                            yOffset: -state.n12.y,
-                            distance: state.distance,
-                            disWidthDelta: 0,
-                            side: -1,
-                            index: i
-                        }
-                    ]);
-                } else if (!after) {
-                    const {distance, n01} = state;
-                    groups.push([
-                        {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: n01.x,
-                            yOffset: n01.y,
-                            distance: distance,
-                            disWidthDelta: 0,
+                        p1: {
                             side: 1,
-                            index: i
+                            offset: [offset.x, offset.y],
+                            delta: 0,
                         },
-                        {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: -n01.x,
-                            yOffset: -n01.y,
-                            distance: distance,
-                            disWidthDelta: 0,
+                        p2: {
                             side: -1,
-                            index: i
-                        }
-                    ]);
-                } else {
-                    v2.set(after[0] - cur[0], after[1] - cur[1]);
-                    state.l12 = v2.length();
-                    v2.normalize()
-                    state.d12.copy(v2);
-                    state.n12.set(-v2.y, v2.x);
-                    const {n01, n12, distance} = state;
-                    const iscw = n01.cross(n12) <= 0;
-                    v2.addVectors(n01, n12).normalize();
-                    v2.multiplyScalar(1 / n01.dot(v2));// v2 here is offset
-                    const disWidthDelta = new Vector2().subVectors(v2, n01).length();
-                    let p1, p0, p2;
-                    if (iscw) {
-                        v2.multiplyScalar(-1);
-                        p1 = {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: v2.x,
-                            yOffset: v2.y,
-                            distance: distance,
-                            disWidthDelta: null,//to do interpolation
-                            side: -1,
-                            cw: true,
-                            n01: n01.clone(),
-                            n12: n12.clone(),
-                            index: i,
-                        }
-                        p0 = {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: v2.x + n01.x * 2,
-                            yOffset: v2.y + n01.y * 2,
-                            distance: distance,
-                            disWidthDelta: -disWidthDelta,
-                            side: 1,
-                            index: i,
-                        }
-                        p2 = {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: v2.x + n12.x * 2,
-                            yOffset: v2.y + n12.y * 2,
-                            distance: distance,
-                            disWidthDelta: +disWidthDelta,
-                            side: 1,
-                            index: i
-                        }
-                    } else {
-                        p1 = {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: v2.x,
-                            yOffset: v2.y,
-                            distance: distance,
-                            disWidthDelta: null,
-                            side: 1,
-                            cw: false,
-                            n01: n01.clone(),
-                            n12: n12.clone(),
-                            index: i,
-                        }
-                        p0 = {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: v2.x - 2 * n01.x,
-                            yOffset: v2.y - 2 * n01.y,
-                            distance: distance,
-                            disWidthDelta: -disWidthDelta,
-                            side: -1,
-                            index: i,
-                        }
-                        p2 = {
-                            x: cur[0],
-                            y: cur[1],
-                            xOffset: v2.x - 2 * n12.x,
-                            yOffset: v2.y - 2 * n12.y,
-                            distance: distance,
-                            disWidthDelta: disWidthDelta,
-                            side: -1,
-                            index: i,
-                        }
-                    }
-                    groups.push([p0, p1, p2]);
+                            offset: [-offset.x, -offset.y],
+                            delta: 0,
+                        },
+                    })
                 }
-                //update state
-                state.distance += state.l12;
-                state.l01 = state.l12;
-                state.l12 = 0;
-                state.d01.copy(state.d12);
-                state.n01.copy(state.n12);
+
+                //between points
+                for (let i = 1, count = path.length; i < count - 1; i++) {
+                    curPoint.set(path[i][0], path[i][1]);
+                    const oldLen = totalLength;
+                    nextPoint.set(path[i + 1][0], path[i + 1][1]);
+                    curDir.subVectors(nextPoint, curPoint);
+                    totalLength += curDir.length(); //更新长度
+                    curDir.normalize();
+                    const isCw = lastDir.cross(curDir) <= 0; //拐角是否是顺时针
+                    n1.copy(lastDir);
+                    n2.copy(curDir);
+
+                    if (isCw) {
+                        n1.set(-n1.y, n1.x); //逆时针90
+                        n2.set(-n2.y, n2.x);
+                    } else {
+                        n1.set(n1.y, -n1.x); //顺时针90
+                        n2.set(n2.y, -n2.x);
+                    }
+
+                    offset.addVectors(n1, n2).normalize();
+                    offset.multiplyScalar(1 / n1.dot(offset));
+                    c0.copy(offset).multiplyScalar(-1);// -offset
+                    c1.copy(c0).addScaledVector(n1, 2);// c0 + 2n1;
+                    c2.copy(c0).addScaledVector(n2, 2);// c0 + 2n2;
+
+                    const delta = temp.subVectors(offset, n1).length();
+                    const c0Side = isCw ? -1 : 1;
+                    const c1c2Side = isCw ? 1 : -1;
+                    //对n1,n2所夹的圆弧插值
+                    const sub = vecInterpolation(n1, n2, -delta, delta, isCw);
+                    vertexCount += sub.length * 2 - 1;
+                    indexCount += (sub.length - 1) * 3;
+                    sub.forEach(item => {
+                        //c0 + 2 * sub
+                        const [x, y] = item.vec;
+                        item.vec = [
+                            c0.x + x * 2,
+                            c0.y + y * 2
+                        ]
+                    })
+                    ctxs.push({
+                        isCw: isCw,
+                        common: {
+                            x: curPoint.x,
+                            y: curPoint.y,
+                            len: oldLen, //长度
+                            index: i, //原始点索引
+                        },
+                        c0: {
+                            side: c0Side,
+                            offset: [c0.x, c0.y],
+                            delta: undefined, //动态值
+                        },
+                        c1: {
+                            side: c1c2Side,
+                            offset: [c1.x, c1.y],
+                            delta: -delta,
+                        },
+                        c2: {
+                            side: c1c2Side,
+                            offset: [c2.x, c2.y],
+                            delta: delta,
+                        },
+                        sub,
+                    });
+                    lastDir.copy(curDir);
+                }
+
+                //the last point
+                {
+                    const lastIndex = path.length - 1
+                    curPoint.set(path[lastIndex][0], path[lastIndex][1]);
+                    offset.copy(lastDir);
+                    offset.set(-offset.y, offset.x);
+                    ctxs.push({
+                        isCw: true,//顺时针
+                        count: 2,  //顶点数
+                        common: {
+                            x: curPoint.x,
+                            y: curPoint.y,
+                            len: totalLength, //长度
+                            index: lastIndex, //原始点索引
+                        },
+                        p1: {
+                            side: 1,
+                            offset: [offset.x, offset.y],
+                            delta: 0,
+                        },
+                        p2: {
+                            side: -1,
+                            offset: [-offset.x, -offset.y],
+                            delta: 0,
+                        },
+                    })
+                }
             }
-            while (groups.length) {
-                const pArr0 = groups.shift();
-                const pArr1 = groups.shift();
-                if (pArr1.length === 2) {
+
+            let vertexCursor = 0, indexCursor = 0;
+            // x,y,offsetx,offsety,distance,delta,side,index
+            const vertexBuffer = new Float32Array(vertexCount * 8);
+            const indexBuffer = new Float64Array(indexCount);
+            {
+                const count = ctxs.length;
+                for (let i = 1; i < count - 1; i++) {
+                    const before = ctxs[i - 1];
+                    const cur = ctxs[i];
+                    const {p1, p2} = before;
+                    const {c0, c1, c2, isCw, sub} = cur;
+
+                    //rect
                     const l = vertices.length;
-                    vertices.push(pArr0[0], pArr0[1], pArr1[0], pArr1[1]);
+                    const _c0 = {...cur.common, ...c0, delta: c1.delta},
+                        _c1 = {...cur.common, ...c1};
+                    vertices.push( //p1,p2,c0,c1
+                        {...before.common, ...p1},
+                        {...before.common, ...p2},
+                        isCw ? _c1 : _c0,
+                        isCw ? _c0 : _c1
+                    )
                     indices.push(l, l + 1, l + 2, l + 1, l + 3, l + 2);
-                } else {
-                    const [s0, s1] = pArr0, [p0, p1, p2] = pArr1;
-                    const {n01, n12, cw, xOffset, yOffset} = p1;
-                    let l = vertices.length;
-                    if (cw) {
-                        vertices.push(s0, s1, p0, {...p1, disWidthDelta: p0.disWidthDelta});
-                    } else {
-                        vertices.push(s0, s1, {...p1, disWidthDelta: p0.disWidthDelta}, p0);
-                    }
-                    indices.push(l, l + 1, l + 2, l + 1, l + 3, l + 2);
-                    const angle = Math.acos(n01.dot(n12)) * RadToDeg;
-                    const per = angle ? Math.ceil(angle / 30) : 0;
-                    //Interpolation
-                    const inters = vecInterpolation(
-                        n01.clone().multiplyScalar(2 * (cw ? 1 : -1)),
-                        n12.clone().multiplyScalar(2 * (cw ? 1 : -1)),
-                        p0.disWidthDelta,
-                        p2.disWidthDelta,
-                        cw,
-                        per + 2
-                    );
-                    for (let i = 0; i < inters.length - 1; i++) {
-                        const bp = inters[i], ap = inters[i + 1];
-                        l = vertices.length;
-                        const t1 = {
-                                ...p0,
-                                xOffset: xOffset + bp.vec.x,
-                                yOffset: yOffset + bp.vec.y,
-                                disWidthDelta: bp.val,
+
+                    //corner
+                    const ll = vertices.length;
+                    const count = sub.length - 1; //份数
+                    const subSide = isCw ? 1 : -1;
+                    vertices.push({
+                        ...cur.common,
+                        delta: sub[0].value,
+                        offset: sub[0].vec,
+                        side: subSide
+                    });
+                    for (let i = 1; i <= count; i++) {
+                        const beforeSub = sub[i - 1];
+                        const curSub = sub[i];
+                        vertices.push(
+                            {
+                                ...cur.common,
+                                ...c0,
+                                delta: (beforeSub.value + curSub.value) / 2
                             },
-                            t2 = {...p1, disWidthDelta: (bp.val + ap.val) * 0.5},
-                            t3 = {
-                                ...p0,
-                                xOffset: xOffset + ap.vec.x,
-                                yOffset: yOffset + ap.vec.y,
-                                disWidthDelta: ap.val,
-                            };
-                        vertices.push(t1, t2, t3);
-                        cw ? indices.push(l, l + 1, l + 2)
-                            : indices.push(l, l + 2, l + 1);
+                            {
+                                ...cur.common,
+                                side: subSide,
+                                delta: curSub.value,
+                                offset: curSub.vec
+                            }
+                        )
+                        const offset = ll + i * 2;
+                        //三角形图元逆时针
+                        isCw ? indices.push(offset - 2, offset - 1, offset)
+                            : indices.push(offset, offset - 1, offset - 2)
                     }
-                    const v = [{...p1, disWidthDelta: p2.disWidthDelta}, p2];
-                    cw && v.reverse();
-                    groups.unshift(v);
+
+                    //update
+                    c0.delta = c2.delta;
+                    cur.p1 = isCw ? c2 : c0;
+                    cur.p2 = isCw ? c0 : c2;
                 }
+
+                //for last point
+                const before = ctxs[count - 2];
+                const cur = ctxs[count - 1];
+                const l = vertices.length;
+                vertices.push(
+                    {...before.common, ...before.p1},
+                    {...before.common, ...before.p2},
+                    {...cur.common, ...cur.p1},
+                    {...cur.common, ...cur.p2}
+                )
+                indices.push(l, l + 1, l + 2, l + 1, l + 3, l + 2);
             }
 
-            vertices.forEach(v => {
-                //the offset is calc in world coord, y axis is upward
-                //but offset is use in screen coord, y axis is downward, flip
-                v.yOffset *= -1;
-                delete v.cw;
-                delete v.n01;
-                delete v.n12;
-            });
-            return {vertices, indices, totalDis: state.distance}
+            vertices = vertices.map((item) => {
+                return {
+                    x: item.x,
+                    y: item.y,
+                    xOffset: item.offset[0],
+                    yOffset: item.offset[1] * -1,
+                    distance: item.len,
+                    disWidthDelta: item.delta,
+                    side: item.side,
+                    index: item.index
+                }
+            })
 
-            function vecInterpolation(n1, n2, range1, range2, cw = true, nums = 5) {
+            return {vertices, indices, totalDis: totalLength}
+
+            function vecInterpolation(n1, n2, range1, range2, cw = true) {
                 const angle = Math.acos(n1.dot(n2) / (n1.length() * n2.length())) || 0;
-                const per = (cw ? -1 : 1) * angle / (nums - 1), perVal = (range2 - range1) / (nums - 1);
+                const splitCount = Math.max((angle / SplitPerAngle) >> 0, 1);
+                if (splitCount === 1) {
+                    return [
+                        {vec: [n1.x, n1.y], value: range1},
+                        {vec: [n2.x, n2.y], value: range2},
+                    ]
+                }
+                const per = (cw ? -1 : 1) * angle / splitCount, perVal = (range2 - range1) / splitCount;
                 const cos = Math.cos(per), sin = Math.sin(per);
-                const res = [];
-                for (let i = 0; i < nums; i++) {
-                    let vec;
-                    if (i === 0) {
-                        vec = {
-                            x: n1.x,
-                            y: n1.y
-                        }
-                    } else {
-                        const before = res[i - 1].vec;
-                        vec = {
-                            x: before.x * cos - before.y * sin,
-                            y: before.x * sin + before.y * cos
-                        }
-                    }
+                const res = [{
+                    vec: [n1.x, n1.y],
+                    value: range1
+                }];
+                for (let i = 1; i <= splitCount; i++) {
+                    const before = res[i - 1];
+                    const _v = before.vec;
                     res.push({
-                        vec: vec,
-                        val: perVal * i + range1
+                        vec: [
+                            _v[0] * cos - _v[1] * sin,
+                            _v[0] * sin + _v[1] * cos
+                        ],
+                        value: before.value + perVal
                     });
                 }
                 return res;
@@ -474,6 +488,7 @@ define([
             };
         });
     }
+
 
     let id = 1;
     const map = new Map();
@@ -506,10 +521,10 @@ define([
                     arr[i] === noDataValue ? 0 : arr[i],
                     arr[i + 1] === noDataValue ? 0 : arr[i + 1]
                 );
-                min = Math.min(min,l);
-                max = Math.max(max,l);
+                min = Math.min(min, l);
+                max = Math.max(max, l);
             }
-            speedRange = [min,max]
+            speedRange = [min, max]
         }
 
         const sampler = createSampler(data);
