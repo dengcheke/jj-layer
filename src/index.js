@@ -27,7 +27,7 @@ export async function loadModules(arr){
     if(invalidModule){
         throw new Error(`未知的模块, 模块名必须是[${keys.join(', ')}]之一`)
     }
-    return Promise.all(arr.map(module=> buildModule(module)))
+    return Promise.all(arr.map(moduleName => buildModule(moduleMap[moduleName])))
 }
 
 export {

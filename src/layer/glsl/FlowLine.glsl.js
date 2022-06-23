@@ -64,13 +64,14 @@ export const FlowLineFragShader = `
        float speed = v_trail.y;
        float length = v_trail.z;
        float cycle = v_trail.w;
+       float halfWidth = max(v_halfWidth, 1.0);
        
        if(!u_isPick){
            float dis = mod(mod(v_dis_percent - u_time * speed, cycle) + cycle, cycle);
            bool isTrail = (dis >= 0.0 && dis < length);
            alpha = isTrail ? clamp(alpha * dis / length, minAlpha, 1.0) : minAlpha;
-
-           float edgeStart = 1.0 - 2.0 / v_halfWidth;
+            
+           float edgeStart = 1.0 - min(halfWidth * 0.5,  2.0) / v_halfWidth;
            alpha *= step(0.0, edgeStart) * (1.0 - smoothstep(edgeStart, 1.0, abs(v_side)));
        }
        gl_FragColor = u_isPick ? v_color : vec4(v_color.rgb, alpha);

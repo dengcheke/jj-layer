@@ -20,8 +20,8 @@ import {
     loadVectorFieldLayer,
     loadRasterColormapLayer,
     loadTip3DLayer,
-    loadFlowLineLayer
-} from "../src";
+    loadModules as loadJJModule
+} from "../dist/esm";
 
 Vue.prototype.$layerLoaders = {
     loadDataSeriesTINMeshLayer,
@@ -30,12 +30,15 @@ Vue.prototype.$layerLoaders = {
     loadClientVectorFieldLayer: loadVectorFieldLayer,
     loadClientRasterColormapLayer:loadRasterColormapLayer,
     loadTip3DLayer,
-    loadFlowingLineLayer:loadFlowLineLayer
+    loadFlowingLineLayer: async (...args) => {
+        const [FlowLineLayer] = await loadJJModule(['flowLineLayer']);
+        return new FlowLineLayer(...args);
+    }
 }
 async function initEsriConfig() {
     const useSelfCDN = false;
     if (!useSelfCDN) {
-        setDefaultOptions({version: '4.22'});
+        setDefaultOptions({version: '4.19'});
     }
     const [config] = await loadModules(["esri/config"],
         useSelfCDN ? {

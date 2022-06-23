@@ -525,8 +525,7 @@ export async function FlowLineLayerBuilder() {
         },
 
         updateRenderParams(state) {
-            const {lineMesh, layer} = this;
-            const trail = layer.renderOpts;
+            const {lineMesh} = this;
             lineMesh.material.blending = CustomBlending;
             const uniform = lineMesh.material.uniforms;
             const rotate = (Math.PI * state.rotation) / 180;
@@ -671,6 +670,8 @@ export async function FlowLineLayerBuilder() {
                     Object.assign(this._renderOpts, v || {});
                 }
             },
+            effect: {},
+            blendMode: {}
         },
         createLayerView: function (view) {
             if (view.type === "2d") {

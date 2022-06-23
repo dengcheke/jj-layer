@@ -522,7 +522,9 @@ export async function DataSeriesTINMeshLayerBuilder() {
                 set(v) {
                     Object.assign(this._renderOpts, v || {});
                 }
-            }
+            },
+            effect: {},
+            blendMode: {}
         },
         getDataByIndex(valIndex) {
             const sData = this.data;

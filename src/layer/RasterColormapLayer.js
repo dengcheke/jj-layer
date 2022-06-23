@@ -12,15 +12,14 @@ import {
     OrthographicCamera,
     RawShaderMaterial,
     SrcAlphaFactor,
-    TextureLoader,
     Vector2,
     WebGLRenderer
 } from "three";
 import {ClientRasterFragShader, ClientRasterVertexShader} from "@src/layer/glsl/RasterColormap.glsl";
-import {genColorRamp, getOptimalUnpackAlign, getRenderTarget, isFloat32Array} from "@src/utils";
+import {getOptimalUnpackAlign, getRenderTarget, isFloat32Array} from "@src/utils";
 import {buildModule} from "@src/builder";
 import {loadModules} from "esri-loader";
-import {_checkTimeTexNeedUpdate, _updateTimeTex, createColorStopsHandle, valueRangeValidate} from "@src/layer/commom";
+import {_checkTimeTexNeedUpdate, _updateTimeTex, createColorStopsHandle} from "@src/layer/commom";
 
 const _mat3 = new Matrix3();
 const defaultColorStops = Object.freeze([
@@ -155,9 +154,9 @@ export async function RasterColormapLayerBuilder() {
                 const pixels = dataArr.map(item => {
                     const arr = item[1];
                     if (arr.length !== size) throw new Error(`data length mismatch,length:${arr.length},cols:${cols},rows:${rows}`);
-                    if(isFloat32Array(arr)){
+                    if (isFloat32Array(arr)) {
                         return arr
-                    }else{
+                    } else {
                         return new Float32Array(arr);
                     }
                 });
@@ -167,11 +166,11 @@ export async function RasterColormapLayerBuilder() {
                     pixels: pixels,
                     minTime: times[0],
                     maxTime: times[times.length - 1],
-                    texSize:[cols, rows],//width, height
+                    texSize: [cols, rows],//width, height
                     unpackAlignment: getOptimalUnpackAlign(cols),
                     flipY: flipY,
                     format: AlphaFormat,
-                    type:FloatType,
+                    type: FloatType,
                     noDataValue,
                     getDataByTime(t) {
                         return pixels[times.indexOf(t)];
@@ -192,9 +191,9 @@ export async function RasterColormapLayerBuilder() {
             this._handlers.push(layer.watch('data', dataHandle));
             this._handlers.push(layer.watch('curTime', () => this.requestRender()));
 
-            this._handlers.push(renderOpts.watch(['valueRange','filterRange'], () => this.requestRender()));
+            this._handlers.push(renderOpts.watch(['valueRange', 'filterRange'], () => this.requestRender()));
 
-            const colorStopsHandle = createColorStopsHandle(this,material)
+            const colorStopsHandle = createColorStopsHandle(this, material)
             this._handlers.push(renderOpts.watch('colorStops', colorStopsHandle));
 
             this._handlers.push(view.watch('extent', () => {
@@ -213,7 +212,7 @@ export async function RasterColormapLayerBuilder() {
 
         render: function ({state}) {
             if (this.destroyed) return;
-            const {layer, dataset,fullExtent, colorRampReady} = this;
+            const {layer, dataset, fullExtent, colorRampReady} = this;
             const {renderOpts} = layer;
             if (!colorRampReady
                 || !layer.visible
@@ -238,7 +237,7 @@ export async function RasterColormapLayerBuilder() {
 
         //更新变换
         updateRenderParams(state) {
-            const {mesh, layer, view, dataset, fullExtent:extent} = this;
+            const {mesh, layer, view, dataset, fullExtent: extent} = this;
             const uniform = mesh.material.uniforms;
             const rotate = -(Math.PI * state.rotation) / 180;
             uniform.u_rotate.value.identity().rotate(rotate);

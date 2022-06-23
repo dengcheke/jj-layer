@@ -561,6 +561,8 @@ export async function DataSeriesGraphicsLayerBuilder() {
         properties: {
             valueRange: {},
             colorStops: {},
+            effect: {},
+            blendMode: {}
         },
     });
     return GraphicsLayer.createSubclass({

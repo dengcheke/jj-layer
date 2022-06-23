@@ -228,6 +228,10 @@ export async function Tip3DLayerBuilder() {
             });
             this.layerView = temp;
             return temp;
+        },
+        properties:{
+            effect: {},
+            blendMode: {}
         }
     });
 }
