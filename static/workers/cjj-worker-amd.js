@@ -199,6 +199,7 @@ define([
     }
 
     const SplitPerAngle = 15 / 180 * Math.PI;
+
     function tessellateLineRound(geometry) {
         if (geometry.type.toLowerCase() !== 'polyline') throw new Error('geometry type is not polyline');
         return geometry.paths.map(_tessellatePath);
@@ -209,13 +210,14 @@ define([
                 return null;
             }
 
-            let vertices = [], indices = [], ctxs = [];
+            const ctxs = [];
             let totalLength = 0; //总长度
             let vertexCount = (path.length - 1) * 4; //顶点数
             let indexCount = (path.length - 1) * 6; //索引数
             //计算布局信息
+
             {
-                //逆时针旋转90 为 side=1
+                //初始dir逆时针旋转90指向的边为side=1,
                 const lastDir = new Vector2(); //上一个方向
                 const n1 = new Vector2(),
                     n2 = new Vector2(),
@@ -276,7 +278,7 @@ define([
                     }
 
                     offset.addVectors(n1, n2).normalize();
-                    offset.multiplyScalar(1 / n1.dot(offset));
+                    offset.multiplyScalar(1 / (n1.dot(offset) || 0.0001));
                     c0.copy(offset).multiplyScalar(-1);// -offset
                     c1.copy(c0).addScaledVector(n1, 2);// c0 + 2n1;
                     c2.copy(c0).addScaledVector(n2, 2);// c0 + 2n2;
@@ -291,10 +293,7 @@ define([
                     sub.forEach(item => {
                         //c0 + 2 * sub
                         const [x, y] = item.vec;
-                        item.vec = [
-                            c0.x + x * 2,
-                            c0.y + y * 2
-                        ]
+                        item.vec = [c0.x + x * 2, c0.y + y * 2]
                     })
                     ctxs.push({
                         isCw: isCw,
@@ -331,8 +330,7 @@ define([
                     offset.copy(lastDir);
                     offset.set(-offset.y, offset.x);
                     ctxs.push({
-                        isCw: true,//顺时针
-                        count: 2,  //顶点数
+                        isCw: true,
                         common: {
                             x: curPoint.x,
                             y: curPoint.y,
@@ -353,95 +351,97 @@ define([
                 }
             }
 
-            let vertexCursor = 0, indexCursor = 0;
+            let vertexCursor = 0, indexCursor = 0, cursor = null;
             // x,y,offsetx,offsety,distance,delta,side,index
-            const vertexBuffer = new Float32Array(vertexCount * 8);
-            const indexBuffer = new Float64Array(indexCount);
-            {
-                const count = ctxs.length;
-                for (let i = 1; i < count - 1; i++) {
-                    const before = ctxs[i - 1];
-                    const cur = ctxs[i];
-                    const {p1, p2} = before;
-                    const {c0, c1, c2, isCw, sub} = cur;
+            const vertexBuffer = new Float64Array(vertexCount * 8);
+            const indexBuffer = new Uint32Array(indexCount);
 
-                    //rect
-                    const l = vertices.length;
-                    const _c0 = {...cur.common, ...c0, delta: c1.delta},
-                        _c1 = {...cur.common, ...c1};
-                    vertices.push( //p1,p2,c0,c1
-                        {...before.common, ...p1},
-                        {...before.common, ...p2},
-                        isCw ? _c1 : _c0,
-                        isCw ? _c0 : _c1
-                    )
-                    indices.push(l, l + 1, l + 2, l + 1, l + 3, l + 2);
 
-                    //corner
-                    const ll = vertices.length;
-                    const count = sub.length - 1; //份数
-                    const subSide = isCw ? 1 : -1;
-                    vertices.push({
+            const ctxCounts = ctxs.length;
+            for (let i = 1; i < ctxCounts - 1; i++) {
+                const before = ctxs[i - 1];
+                const cur = ctxs[i];
+                const {p1, p2} = before;
+                const {c0, c1, c2, isCw, sub} = cur;
+
+                //rect
+                const _c0 = {...cur.common, ...c0, delta: c1.delta},
+                    _c1 = {...cur.common, ...c1};
+
+                cursor = vertexCursor;
+                writeVertex(vertexCursor++, {...before.common, ...p1});
+                writeVertex(vertexCursor++, {...before.common, ...p2});
+                writeVertex(vertexCursor++, isCw ? _c1 : _c0);
+                writeVertex(vertexCursor++, isCw ? _c0 : _c1);
+                pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
+
+                //corner
+                cursor = vertexCursor;
+                const subCount = sub.length - 1; //份数
+                const subSide = isCw ? 1 : -1;
+                writeVertex(vertexCursor++, {
+                    ...cur.common,
+                    delta: sub[0].value,
+                    offset: sub[0].vec,
+                    side: subSide
+                });
+                for (let i = 1; i <= subCount; i++) {
+                    const beforeSub = sub[i - 1];
+                    const curSub = sub[i];
+                    writeVertex(vertexCursor++, {
                         ...cur.common,
-                        delta: sub[0].value,
-                        offset: sub[0].vec,
-                        side: subSide
+                        ...c0,
+                        delta: (beforeSub.value + curSub.value) / 2
                     });
-                    for (let i = 1; i <= count; i++) {
-                        const beforeSub = sub[i - 1];
-                        const curSub = sub[i];
-                        vertices.push(
-                            {
-                                ...cur.common,
-                                ...c0,
-                                delta: (beforeSub.value + curSub.value) / 2
-                            },
-                            {
-                                ...cur.common,
-                                side: subSide,
-                                delta: curSub.value,
-                                offset: curSub.vec
-                            }
-                        )
-                        const offset = ll + i * 2;
-                        //三角形图元逆时针
-                        isCw ? indices.push(offset - 2, offset - 1, offset)
-                            : indices.push(offset, offset - 1, offset - 2)
-                    }
-
-                    //update
-                    c0.delta = c2.delta;
-                    cur.p1 = isCw ? c2 : c0;
-                    cur.p2 = isCw ? c0 : c2;
+                    writeVertex(vertexCursor++, {
+                        ...cur.common,
+                        side: subSide,
+                        delta: curSub.value,
+                        offset: curSub.vec
+                    });
+                    const _cursor = cursor + i * 2;
+                    isCw ? pushIndex(_cursor - 2, _cursor - 1, _cursor)
+                        : pushIndex(_cursor, _cursor - 1, _cursor - 2);
                 }
 
-                //for last point
-                const before = ctxs[count - 2];
-                const cur = ctxs[count - 1];
-                const l = vertices.length;
-                vertices.push(
-                    {...before.common, ...before.p1},
-                    {...before.common, ...before.p2},
-                    {...cur.common, ...cur.p1},
-                    {...cur.common, ...cur.p2}
-                )
-                indices.push(l, l + 1, l + 2, l + 1, l + 3, l + 2);
+                //update
+                c0.delta = c2.delta;
+                cur.p1 = isCw ? c2 : c0;
+                cur.p2 = isCw ? c0 : c2;
             }
 
-            vertices = vertices.map((item) => {
-                return {
-                    x: item.x,
-                    y: item.y,
-                    xOffset: item.offset[0],
-                    yOffset: item.offset[1] * -1,
-                    distance: item.len,
-                    disWidthDelta: item.delta,
-                    side: item.side,
-                    index: item.index
-                }
-            })
+            //for last point
+            const before = ctxs[ctxCounts - 2];
+            const cur = ctxs[ctxCounts - 1];
+            cursor = vertexCursor;
+            writeVertex(vertexCursor++, {...before.common, ...before.p1});
+            writeVertex(vertexCursor++, {...before.common, ...before.p2});
+            writeVertex(vertexCursor++, {...cur.common, ...cur.p1},);
+            writeVertex(vertexCursor++, {...cur.common, ...cur.p2});
+            pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
 
-            return {vertices, indices, totalDis: totalLength}
+
+            return {vertex:vertexBuffer, index:indexBuffer, totalDis: totalLength}
+
+            function writeVertex(index, data) {
+                const i8 = index * 8;
+                vertexBuffer[i8] = data.x;
+                vertexBuffer[i8 + 1] = data.y;
+                vertexBuffer[i8 + 2] = data.offset[0];
+                vertexBuffer[i8 + 3] = data.offset[1] * -1;
+                vertexBuffer[i8 + 4] = data.len;
+                vertexBuffer[i8 + 5] = data.delta;
+                vertexBuffer[i8 + 6] = data.side;
+                vertexBuffer[i8 + 7] = data.index;
+            }
+
+            function pushIndex(...args) {
+                const now = indexCursor;
+                for (let i = 0; i < args.length; i++) {
+                    indexBuffer[now + i] = args[i];
+                }
+                indexCursor += args.length;
+            }
 
             function vecInterpolation(n1, n2, range1, range2, cw = true) {
                 const angle = Math.acos(n1.dot(n2) / (n1.length() * n2.length())) || 0;
@@ -482,9 +482,19 @@ define([
             if (!sr.equals(geometry.spatialReference)) {
                 geometry = projection.project(geometry, sr);
             }
+            const transferList = [];
+            const meshBuffers = tessellateLineRound(geometry);
+            meshBuffers.forEach(item=>{
+                transferList.push(item.vertex.buffer);
+                transferList.push(item.index.buffer);
+            })
+            setCache(meshBuffers[0].vertex);
             return {
-                mesh: tessellateLineRound(geometry),
-                extent: geometry.extent.toJSON()
+                result:{
+                    mesh: meshBuffers,
+                    extent: geometry.extent.toJSON()
+                },
+                transferList
             };
         });
     }

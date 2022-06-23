@@ -49,7 +49,7 @@ function createNewGeometry() {
     return geo;
 }
 
-async function DataSeriesTINLayerBuilder() {
+export async function DataSeriesTINMeshLayerBuilder() {
     let [Accessor, Graphic, Layer, workers, SpatialReference,
         BaseLayerViewGL2D, Extent, projection, kernel]
         = await loadModules([
@@ -547,6 +547,6 @@ async function DataSeriesTINLayerBuilder() {
 }
 
 export async function loadDataSeriesTINMeshLayer(opts) {
-    const ctor = await buildModule(DataSeriesTINLayerBuilder)
+    const ctor = await buildModule(DataSeriesTINMeshLayerBuilder)
     return new ctor(opts);
 }

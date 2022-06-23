@@ -28,7 +28,7 @@ const defaultColorStops = Object.freeze([
     {value: 1, color: 'red'},
 ])
 
-async function ClientRasterColormapLayerBuilder() {
+export async function RasterColormapLayerBuilder() {
     const [Accessor, Layer, BaseLayerViewGL2D, projection, kernel]
         = await loadModules([
         "esri/core/Accessor",
@@ -359,7 +359,7 @@ async function ClientRasterColormapLayerBuilder() {
     });
 }
 
-export async function loadClientRasterColormapLayer(opts) {
-    const ctor = await buildModule(ClientRasterColormapLayerBuilder)
+export async function loadRasterColormapLayer(opts) {
+    const ctor = await buildModule(RasterColormapLayerBuilder)
     return new ctor(opts);
 }

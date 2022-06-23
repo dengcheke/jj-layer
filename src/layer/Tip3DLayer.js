@@ -17,7 +17,7 @@ import {getRenderTarget} from "@src/utils";
 import {loadModules} from "esri-loader";
 
 
-async function Tip3DLayerBuilder() {
+export async function Tip3DLayerBuilder() {
     const [
         watchUtils, GraphicsLayer, BaseLayerViewGL2D,
         Extent, projection, kernel
@@ -196,7 +196,7 @@ async function Tip3DLayerBuilder() {
             position.set(_pos.x, _pos.y * this.COS, -_pos.y * this.SIN);
 
             const _scale = new Vector2(1, 1)
-                .multiplyScalar(state.pixelRatio * (graphic.attributes?.size || this.DEFAULT_SIZE))
+                .multiplyScalar(state.pixelRatio * (graphic.tipStyle?.size || this.DEFAULT_SIZE))
                 .multiply({
                     x: 1 / viewSize[1],
                     y: 1 / viewSize[1]
@@ -206,8 +206,8 @@ async function Tip3DLayerBuilder() {
             position.y += Math.cos(performance.now() * 0.0035) * 0.5 * _scale.y;
             rotation.y += 0.009;
 
-            renderInfo.color = graphic.attributes?.color || this.DEFAULT_COLOR
-            renderInfo.emissive = graphic.attributes?.emissive || this.DEFAULT_EMISSIVE
+            renderInfo.color = graphic.tipStyle?.color || this.DEFAULT_COLOR
+            renderInfo.emissive = graphic.tipStyle?.emissive || this.DEFAULT_EMISSIVE
 
             return renderInfo;
 

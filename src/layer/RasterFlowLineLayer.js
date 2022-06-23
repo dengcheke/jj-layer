@@ -29,7 +29,7 @@ import {loadModules} from "esri-loader";
 
 const _mat3 = new Matrix3();
 
-async function ClientRasterFlowLineLayerBuilder() {
+export async function RasterFlowLineLayerBuilder() {
     const [
         Accessor, Layer,
         BaseLayerViewGL2D, workers, projection, kernel
@@ -780,7 +780,7 @@ async function ClientRasterFlowLineLayerBuilder() {
     });
 }
 
-export async function loadClientRasterFlowLineLayer(opts) {
-    const ctor = await buildModule(ClientRasterFlowLineLayerBuilder)
+export async function loadRasterFlowLineLayer(opts) {
+    const ctor = await buildModule(RasterFlowLineLayerBuilder)
     return new ctor(opts);
 }

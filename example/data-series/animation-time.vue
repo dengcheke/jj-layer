@@ -163,9 +163,8 @@ export default {
                         symbol: hlMap[type],
                     })
                     tip3DLayer.add({
-                        attributes: {
-                            size: 50,
-                            //color: new Color().setHSL(Math.random() * 0.5 + 0.5, Math.random() * 0.5 + 0.5, 1.0)
+                        tipStyle: {
+                            size: 50
                         },
                         geometry: graphic.geometry.centroid,
                     })

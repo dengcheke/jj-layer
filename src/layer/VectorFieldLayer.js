@@ -28,7 +28,7 @@ const defaultColorStops = Object.freeze([
     {value: 1, color: 'red'},
 ])
 
-async function ClientVectorFieldLayerBuilder() {
+export async function VectorFieldLayerBuilder() {
     let [Accessor, Layer, BaseLayerViewGL2D, projection, kernel]
         = await loadModules([
         "esri/core/Accessor",
@@ -420,7 +420,7 @@ async function ClientVectorFieldLayerBuilder() {
     });
 }
 
-export async function loadClientVectorFieldLayer(opts) {
-    const ctor = await buildModule(ClientVectorFieldLayerBuilder)
+export async function loadVectorFieldLayer(opts) {
+    const ctor = await buildModule(VectorFieldLayerBuilder)
     return new ctor(opts);
 }

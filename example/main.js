@@ -15,22 +15,22 @@ Vue.component('EleRwDialog', EleRwDialog);
 
 import {
     loadDataSeriesTINMeshLayer,
-    loadClientRasterFlowLineLayer,
+    loadRasterFlowLineLayer,
     loadDataSeriesGraphicsLayer,
-    loadClientVectorFieldLayer,
-    loadClientRasterColormapLayer,
+    loadVectorFieldLayer,
+    loadRasterColormapLayer,
     loadTip3DLayer,
-    loadFlowingLineLayer
+    loadFlowLineLayer
 } from "../src";
 
 Vue.prototype.$layerLoaders = {
     loadDataSeriesTINMeshLayer,
-    loadClientRasterFlowLineLayer,
+    loadClientRasterFlowLineLayer:loadRasterFlowLineLayer,
     loadDataSeriesGraphicsLayer,
-    loadClientVectorFieldLayer,
-    loadClientRasterColormapLayer,
+    loadClientVectorFieldLayer: loadVectorFieldLayer,
+    loadClientRasterColormapLayer:loadRasterColormapLayer,
     loadTip3DLayer,
-    loadFlowingLineLayer
+    loadFlowingLineLayer:loadFlowLineLayer
 }
 async function initEsriConfig() {
     const useSelfCDN = false;

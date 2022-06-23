@@ -5,13 +5,14 @@ import {
     getRenderTarget,
     id2RGBA,
     isNil,
+    nextTick,
     parseValueNotNil,
     RGBA2Id,
     versionErrCatch
 } from "@src/utils";
 import {
     BufferGeometry,
-    CustomBlending, DoubleSide,
+    CustomBlending,
     Float32BufferAttribute,
     MathUtils,
     Matrix3,
@@ -47,7 +48,7 @@ const Flags = Object.freeze({
     appear: 'appear'
 })
 
-async function FlowingLineLayerBuilder() {
+export async function FlowLineLayerBuilder() {
     const [
         Color, Accessor, watchUtils, GraphicsLayer,
         BaseLayerViewGL2D, Extent, workers, kernel
@@ -64,7 +65,6 @@ async function FlowingLineLayerBuilder() {
 
     const ARCGIS_VERSION = parseFloat(kernel.version);
     const Trail = Accessor.createSubclass({
-        declaredClass: 'custom.trail',
         constructor: function () {
             this.minAlpha = DEFAULT_CONFIG.minAlpha; // ∈ [0,1]
             this.speed = DEFAULT_CONFIG.speed;  // ∈ [0,1]
@@ -114,6 +114,7 @@ async function FlowingLineLayerBuilder() {
     const CustomLayerView2D = BaseLayerViewGL2D.createSubclass({
         constructor: function () {
             this._handlers = [];
+            this.connect = null;
 
             this.useVertexColor = false;
             this.colorRamp = null;
@@ -169,10 +170,11 @@ async function FlowingLineLayerBuilder() {
                 if (this.destroyed) return;
                 const graphics = this.layer.graphics.items;
                 const viewSR = this.view.spatialReference;
+                //clear
                 {
                     //this.layer.fullExtent = null;
                     this.fullExtent = null;
-                    this.updateFlags.clear();
+                    this.updateFlags.delete(Flags.data);
                     this.meshes = null;
                     visibleWatcher?.remove();
                     visibleWatcher = null;
@@ -184,33 +186,36 @@ async function FlowingLineLayerBuilder() {
 
                 check(async () => {
                     let fullExtent = null;
-                    const connect = await workers.open(WORKER_PATH);
-                    const task = graphics.map(async (g, idx) => {
-                        if (!meshCache.has(g.geometry)) {
-                            const {mesh, extent} = await connect.invoke(
-                                'tessellateFlowLine',
-                                JSON.stringify({
-                                    sr: viewSR.toJSON(),
-                                    geometry: g.geometry.toJSON()
-                                })
-                            );
-                            meshCache.set(g.geometry, mesh);
-                            projExtentCache.set(g.geometry, new Extent(extent));
-                        }
-                        const mesh = meshCache.get(g.geometry);
-                        const extent = projExtentCache.get(g.geometry);
-                        if (!fullExtent) {
-                            fullExtent = extent.clone();
-                        } else {
-                            fullExtent.union(extent);
-                        }
-                        return {
-                            mesh,
-                            pickId: idx + 1,
-                            graphic: g
-                        }
-                    });
-                    const meshes = await Promise.all(task);
+                    const connect = await this.getConnect();
+                    const allTasks = [];
+                    for (let i = 0; i < graphics.length; i++) {
+                        const g = graphics[i], pickId = i + 1;
+                        await nextTick();
+                        allTasks.push(new Promise(async resolve => {
+                            if (!meshCache.has(g.geometry)) {
+                                const {mesh, extent} = await connect.invoke(
+                                    'tessellateFlowLine',
+                                    JSON.stringify({
+                                        sr: viewSR.toJSON(),
+                                        geometry: g.geometry.toJSON()
+                                    })
+                                );
+                                meshCache.set(g.geometry, mesh);
+                                projExtentCache.set(g.geometry, new Extent(extent));
+                            }
+                            const mesh = meshCache.get(g.geometry);
+                            const extent = projExtentCache.get(g.geometry);
+                            if (!fullExtent) {
+                                fullExtent = extent.clone();
+                            } else {
+                                fullExtent.union(extent);
+                            }
+                            resolve({
+                                mesh, pickId, graphic: g
+                            })
+                        }))
+                    }
+                    const meshes = await Promise.all(allTasks);
                     return {meshes, fullExtent}
                 }).then(({fullExtent, meshes}) => {
                     this.meshes = meshes;
@@ -219,9 +224,9 @@ async function FlowingLineLayerBuilder() {
                         for (let i = 0; i < meshes.length; i++) {
                             const mesh = meshes[i].mesh;
                             for (let j = 0; j < mesh.length; j++) {
-                                const {vertices, indices} = mesh[j];
-                                vertexCount += vertices.length;
-                                indexCount += indices.length;
+                                const {vertex, index} = mesh[j];
+                                vertexCount += vertex.length / 8;
+                                indexCount += index.length;
                             }
                         }
                         this.meshes.vertexCount = vertexCount;
@@ -320,6 +325,8 @@ async function FlowingLineLayerBuilder() {
         },
 
         detach: function () {
+            this.connect?.close();
+            this.connect = null;
             this._handlers.forEach(i => i.remove());
             this._handlers = [];
         },
@@ -424,38 +431,38 @@ async function FlowingLineLayerBuilder() {
                 lineColor && (lineColor.a *= 255);
                 //subpath
                 for (let pathIdx = 0; pathIdx < mesh.length; pathIdx++) {
-                    const {indices, vertices, totalDis} = mesh[pathIdx];
+                    const {index, vertex, totalDis} = mesh[pathIdx];
                     if (dataChange) {
-                        for (let i = 0; i < indices.length; ++i) {
-                            let idx = indices[i];
+                        for (let i = 0; i < index.length; ++i) {
+                            let idx = index[i];
                             indexData[currentIndex] = currentVertex + idx;
                             currentIndex++;
                         }
                     }
-                    for (let i = 0; i < vertices.length; ++i) {
-                        const c4 = currentVertex * 4,
+                    for (let i = 0, len = vertex.length / 8; i < len; ++i) {
+                        const i8 = i * 8,
+                            c4 = currentVertex * 4,
                             c2 = currentVertex * 2,
                             c41 = c4 + 1,
                             c42 = c4 + 2,
                             c43 = c4 + 3;
 
-                        const v = vertices[i];
+                        // vertex: x,y,offsetx,offsety,distance,delta,side,index
                         if (dataChange) {
-                            const {x, y} = v;
-                            const [hx, lx] = doubleToTwoFloats(x);
-                            const [hy, ly] = doubleToTwoFloats(y);
+                            const [hx, lx] = doubleToTwoFloats(vertex[i8]);
+                            const [hy, ly] = doubleToTwoFloats(vertex[i8 + 1]);
                             posBuf[c4] = hx;
                             posBuf[c41] = hy;
                             posBuf[c42] = lx;
                             posBuf[c43] = ly;
 
-                            offsetBuf[c2] = v.xOffset;
-                            offsetBuf[c2 + 1] = v.yOffset;
+                            offsetBuf[c2] = vertex[i8 + 2];
+                            offsetBuf[c2 + 1] = vertex[i8 + 3];
 
-                            disInfoBuf[c4] = v.distance;
+                            disInfoBuf[c4] = vertex[i8 + 4];
                             disInfoBuf[c41] = totalDis;
-                            disInfoBuf[c42] = v.disWidthDelta;
-                            disInfoBuf[c43] = v.side;
+                            disInfoBuf[c42] = vertex[i8 + 5];
+                            disInfoBuf[c43] = vertex[i8 + 6];
 
                             pickColorBuf[c4] = pickColor[0];
                             pickColorBuf[c41] = pickColor[1];
@@ -470,13 +477,13 @@ async function FlowingLineLayerBuilder() {
 
                             if (useVertexColor) {
                                 if (vertexColor) {
-                                    const value = vertexColor[pathIdx]?.[v.index];
+                                    const value = vertexColor[pathIdx]?.[vertex[i8 + 7]];
                                     if (!isNil(value)) {
                                         _color = new Color(value);
                                         _color.a *= 255;
                                     }
                                 } else {
-                                    const value = vertexValue?.[pathIdx]?.[v.index];
+                                    const value = vertexValue?.[pathIdx]?.[vertex[i8 + 7]];
                                     if (!isNil(value) && !isNaN(value)) {
                                         _color = getPointColor(MathUtils.clamp((value - min) / r, 0, 1));
                                     }
@@ -635,6 +642,14 @@ async function FlowingLineLayerBuilder() {
                 return Promise.resolve(null);
             }
         },
+
+        async getConnect() {
+            if (!this.connect) {
+                this.connect = await workers.open(WORKER_PATH);
+            }
+            return this.connect;
+        },
+
     });
     return GraphicsLayer.createSubclass({
         constructor: function () {
@@ -678,7 +693,7 @@ async function FlowingLineLayerBuilder() {
     });
 }
 
-export async function loadFlowingLineLayer(opts) {
-    const ctor = await buildModule(FlowingLineLayerBuilder)
+export async function loadFlowLineLayer(opts) {
+    const ctor = await buildModule(FlowLineLayerBuilder)
     return new ctor(opts);
 }

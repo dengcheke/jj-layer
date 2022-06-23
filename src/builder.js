@@ -23,3 +23,4 @@ export async function buildModule(moduleBuildFunc) {
     await module._promise;
     return module.module;
 }
+

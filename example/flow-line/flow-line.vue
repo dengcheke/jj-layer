@@ -92,12 +92,11 @@ export default {
                             cycle: 0.5,
                         },
                         vertexValue: [
-                            new Array(item.geometry.coordinates.length).fill(0).map(() => Math.random() * 100)
+                            new Array(item.geometry.coordinates.length)
+                                .fill(0).map(() => Math.random() * 100)
                         ],
                         geometry: {
-                            paths: [
-                                item.geometry.coordinates
-                            ],
+                            paths: [item.geometry.coordinates],
                             type: "polyline",
                             spatialReference: {
                                 wkid: 4326
@@ -127,7 +126,6 @@ export default {
             console.log(ly)
             return ly
         }
-
     }
 }
 </script>

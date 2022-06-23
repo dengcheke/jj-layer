@@ -39,7 +39,7 @@ const Flags = Object.freeze({
     indexKey: 'indexKey'
 })
 
-async function DataSeriesGraphicsLayerBuilder() {
+export async function DataSeriesGraphicsLayerBuilder() {
     let [watchUtils, Accessor, GraphicsLayer, BaseLayerViewGL2D, geometryEngineAsync, Extent, projection, kernel]
         = await loadModules([
         "esri/core/watchUtils",
