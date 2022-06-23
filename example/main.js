@@ -35,12 +35,13 @@ Vue.prototype.$layerLoaders = {
         return new FlowLineLayer(...args);
     }
 }
+
 async function initEsriConfig() {
     const useSelfCDN = false;
     if (!useSelfCDN) {
         setDefaultOptions({version: '4.19'});
     }
-    const [config] = await loadModules(["esri/config"],
+    const [config,kernel] = await loadModules(["esri/config","esri/kernel"],
         useSelfCDN ? {
             url: "http://119.3.227.192:10022/gisdata/libs/arcgis_v4.18/init.js",
             css: "http://119.3.227.192:10022/gisdata/libs/arcgis_v4.18/esri/themes/light/main.css",
@@ -48,11 +49,17 @@ async function initEsriConfig() {
     if (useSelfCDN) {
         config.fontsUrl = 'http://119.3.227.192:10022/gisdata/arcgisFont';
     }
+
     Object.assign(config.workers.loaderConfig.paths, {
         customWorkers: PROCESS_ENV === 'production'
             ? STATIC_URL
             : document.location.origin + "/workers",
-    })
+    });
+
+    const div = document.createElement('div')
+    div.innerText = `arcgis api version:${kernel.version}`;
+    div.style.cssText = "position:fixed;right:0;bottom:0;background:white;color:black;padding:10px";
+    document.body.append(div)
 }
 
 initEsriConfig().then(() => {
