@@ -1,6 +1,6 @@
 {
     "name": "jj-layer",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "description": "custom arcgis 2D layer, used to visualize the simulation process of some models, use threejs as render engine",
     "scripts": {
         "example": "cross-env NODE_ENV=development webpack-dev-server --config ./build/example.config.js",
