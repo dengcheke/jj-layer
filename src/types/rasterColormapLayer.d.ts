@@ -19,4 +19,4 @@ interface RasterColormapLayer extends Layer {
     renderOpts: RasterColormapRenderOpts
 }
 
-export declare function loadClientRasterColormapLayer(opts?: RasterColormapLayerProperties): Promise<RasterColormapLayer>
+export declare function loadRasterColormapLayer(opts?: RasterColormapLayerProperties): Promise<RasterColormapLayer>

@@ -38,4 +38,4 @@ interface RasterFlowLineLayer extends Layer {
     renderOpts: RasterFlowLineRenderOpts
 }
 
-export declare function loadClientRasterFlowLineLayer(opts?: RasterFlowLineLayerProperties): Promise<RasterFlowLineLayer>
+export declare function loadRasterFlowLineLayer(opts?: RasterFlowLineLayerProperties): Promise<RasterFlowLineLayer>

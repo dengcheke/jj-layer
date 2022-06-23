@@ -8,7 +8,7 @@ type VertexColor = {
     valueRange:number[]
 } | boolean;
 
-interface FlowingLineRenderOpts {
+interface FlowLineRenderOpts {
     minAlpha?: number,
     speed?: number,
     length?: number,
@@ -18,11 +18,11 @@ interface FlowingLineRenderOpts {
     flow?: boolean,
     vertexColor?: VertexColor
 }
-interface FlowingLineLayerProperties extends __esri.GraphicsLayerProperties {
-    renderOpts?: FlowingLineRenderOpts
+interface FlowLineLayerProperties extends __esri.GraphicsLayerProperties {
+    renderOpts?: FlowLineRenderOpts
 }
-interface FlowingLineLayer extends GraphicsLayer {
-    renderOpts: FlowingLineRenderOpts;
+interface FlowLineLayer extends GraphicsLayer {
+    renderOpts: FlowLineRenderOpts;
     updateStyle():void
 }
-export declare function loadFlowingLineLayer(opts?:FlowingLineLayerProperties): Promise<FlowingLineLayer>
+export declare function loadFlowLineLayer(opts?:FlowLineLayerProperties): Promise<FlowLineLayer>

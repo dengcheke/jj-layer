@@ -24,4 +24,4 @@ interface VectorFieldLayer extends Layer {
     renderOpts: VectorFieldRenderOpts
 }
 
-export declare function loadClientVectorFieldLayer(opts?: VectorFieldLayerProperties): Promise<VectorFieldLayer>
+export declare function loadVectorFieldLayer(opts?: VectorFieldLayerProperties): Promise<VectorFieldLayer>
