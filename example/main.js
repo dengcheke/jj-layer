@@ -21,7 +21,7 @@ import {
     loadRasterColormapLayer,
     loadTip3DLayer,
     loadModules as loadJJModule
-} from "../dist/esm";
+} from "../src";
 
 Vue.prototype.$layerLoaders = {
     loadDataSeriesTINMeshLayer,

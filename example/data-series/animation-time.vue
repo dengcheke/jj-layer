@@ -110,6 +110,7 @@ export default {
         const container = this.$refs.map;
         const {map, view} = await this.initMap(container);
         const baseLayer = await this.loadCustomLy();
+        console.log(baseLayer)
         const [Graphic,GraphicsLayer] = await loadModules(["esri/Graphic","esri/layers/GraphicsLayer"]);
         this.layer = baseLayer;
         map.add(baseLayer);

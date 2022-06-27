@@ -12,6 +12,8 @@ import {
     OrthographicCamera,
     RawShaderMaterial,
     SrcAlphaFactor,
+    Uint16BufferAttribute,
+    Uint32BufferAttribute,
     Uint8ClampedBufferAttribute,
     Vector2,
     Vector4,
@@ -162,7 +164,6 @@ export async function DataSeriesGraphicsLayerBuilder() {
                     visibleWatcher?.remove();
                     visibleWatcher = null;
                 }
-
                 if (!graphics.length) {
                     this.requestRender();
                     return;
@@ -369,80 +370,102 @@ export async function DataSeriesGraphicsLayerBuilder() {
                         name,
                         new ctor(new typeArr(itemSize * vertexCount), itemSize, normalized)
                     );
-                })
+                });
+                geometry.index = vertexCount > 65535
+                    ? new Uint32BufferAttribute(new Uint32Array(indexCount), 1)
+                    : new Uint16BufferAttribute(new Uint16Array(indexCount), 1);
             }
 
-            const geometry = meshObj.geometry;
-            const posBuf = geometry.getAttribute('a_position').array;
-            const offsetBuf = geometry.getAttribute('a_offset').array;
-            const uprightBuf = geometry.getAttribute('a_upright').array;
-            const indexBuf = geometry.getAttribute('a_dataIndex').array;
-            const visibleBuf = geometry.getAttribute('a_visible').array;
-            const pickColorBuf = geometry.getAttribute('a_pickColor').array;
+            dataChange ? dataChangeUpdateFn(meshes, meshObj.geometry)
+                : appearUpdateFn(meshes, meshObj.geometry)
 
-            //this is vertex index, not data index
-            const indexData = dataChange ? new Array(indexCount) : null;
+            this.updateFlags.clear();
 
-            let currentVertex = 0;
-            let currentIndex = 0;
-
-            for (let meshIndex = 0; meshIndex < meshes.length; ++meshIndex) {
-                const item = this.meshes[meshIndex];
-                const {mesh, graphic, index} = item;
-
-                const pickColor = dataChange ? id2RGBA(item.pickIdx) : null;
-                const visible = graphic.visible ? 1 : 0;
-                const upright = graphic.attributes?.upright ? 1 : 0;
-
-                if (dataChange) {
-                    for (let i = 0; i < mesh.indices.length; ++i) {
-                        let idx = mesh.indices[i];
-                        indexData[currentIndex] = currentVertex + idx;
-                        currentIndex++;
+            function dataChangeUpdateFn(meshes, geometry) {
+                for (let meshIndex = meshes.length,
+                         vertexCursor = 0,
+                         indexCursor = 0,
+                         indexData = geometry.index.array,
+                         posBuf = geometry.getAttribute('a_position').array,
+                         offsetBuf = geometry.getAttribute('a_offset').array,
+                         uprightBuf = geometry.getAttribute('a_upright').array,
+                         indexBuf = geometry.getAttribute('a_dataIndex').array,
+                         visibleBuf = geometry.getAttribute('a_visible').array,
+                         pickColorBuf = geometry.getAttribute('a_pickColor').array
+                    ; meshIndex--;) {
+                    const item = meshes[meshIndex];
+                    //update index
+                    for (let i = 0,
+                             arr = item.mesh.indices,
+                             len = arr.length
+                        ; i < len; ++i) {
+                        indexData[indexCursor] = vertexCursor + arr[i];
+                        indexCursor++;
                     }
-                }
 
-                for (let i = 0; i < mesh.vertices.length; ++i) {
-                    if (dataChange) {
-                        const c2 = currentVertex * 2, c4 = currentVertex * 4;
-                        const v = mesh.vertices[i], {x, y} = v;
-                        const [hx, lx] = doubleToTwoFloats(x);
-                        const [hy, ly] = doubleToTwoFloats(y);
+                    const pickColor = id2RGBA(item.pickIdx);
+                    const visible = item.graphic.visible ? 1 : 0;
+                    const upright = item.graphic.attributes?.upright ? 1 : 0;
+
+                    for (let i = 0,
+                             vertices = item.mesh.vertices,
+                             len = vertices.length,
+                             curVertex = null
+                        ; i < len; ++i) {
+
+                        curVertex = vertices[i];
+
+                        const c2 = vertexCursor * 2,
+                            c4 = vertexCursor * 4,
+                            c41 = c4 + 1,
+                            c42 = c4 + 2,
+                            c43 = c4 + 3;
+
+                        const [hx, lx] = doubleToTwoFloats(curVertex.x);
+                        const [hy, ly] = doubleToTwoFloats(curVertex.y);
                         posBuf[c4] = hx;
-                        posBuf[c4 + 1] = hy;
-                        posBuf[c4 + 2] = lx;
-                        posBuf[c4 + 3] = ly;
+                        posBuf[c41] = hy;
+                        posBuf[c42] = lx;
+                        posBuf[c43] = ly;
 
-                        offsetBuf[c2] = v.xOffset;
-                        offsetBuf[c2 + 1] = v.yOffset;
+                        offsetBuf[c2] = curVertex.xOffset;
+                        offsetBuf[c2 + 1] = curVertex.yOffset;
 
-                        uprightBuf[currentVertex] = upright;
+                        uprightBuf[vertexCursor] = upright;
 
                         pickColorBuf[c4] = pickColor[0];
-                        pickColorBuf[c4 + 1] = pickColor[1];
-                        pickColorBuf[c4 + 2] = pickColor[2];
-                        pickColorBuf[c4 + 3] = pickColor[3];
+                        pickColorBuf[c41] = pickColor[1];
+                        pickColorBuf[c42] = pickColor[2];
+                        pickColorBuf[c43] = pickColor[3];
 
+                        indexBuf[vertexCursor] = item.index;
+                        visibleBuf[vertexCursor] = visible;
+                        vertexCursor++;
                     }
-                    if (indexKeyChange) indexBuf[currentVertex] = index;
-                    if (appearChange) visibleBuf[currentVertex] = visible;
-                    currentVertex++;
                 }
             }
 
-            if (dataChange) {
-                for (let attr in geometry.attributes) {
-                    geometry.getAttribute(attr).needsUpdate = true;
+            function appearUpdateFn(meshes, geometry) {
+                for (let meshIndex = meshes.length,
+                         vertexCursor = 0,
+                         indexBuf = geometry.getAttribute('a_dataIndex').array,
+                         visibleBuf = geometry.getAttribute('a_visible').array
+                    ; meshIndex--;) {
+                    const item = meshes[meshIndex];
+                    const visible = item.graphic.visible ? 1 : 0;
+                    for (let i = 0,
+                             vertices = item.mesh.vertices,
+                             len = vertices.length
+                        ; i < len; ++i) {
+
+                        indexBuf[vertexCursor] = item.index;
+                        visibleBuf[vertexCursor] = visible;
+                        vertexCursor++;
+                    }
                 }
-            }
-            if (indexKeyChange) {
                 geometry.getAttribute('a_dataIndex').needsUpdate = true;
-            }
-            if (appearChange) {
                 geometry.getAttribute('a_visible').needsUpdate = true;
             }
-            dataChange && geometry.setIndex(indexData);
-            this.updateFlags.clear();
         },
         processGraphic: function (geo, attr) {
             let size, x, y;
