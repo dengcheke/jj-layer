@@ -199,7 +199,8 @@ define([
     }
 
     const SplitPerAngle = 15 / 180 * Math.PI;
-
+    const MinValue = 2**-1074;
+    const precisionNear1 = 2**-53; // double 0.5-1之间的精度
     function tessellateLineRound(geometry) {
         if (geometry.type.toLowerCase() !== 'polyline') throw new Error('geometry type is not polyline');
         return geometry.paths.map(_tessellatePath);
@@ -208,6 +209,22 @@ define([
             if (path.length < 2) {
                 console.warn(`path's point length < 2, ignored`);
                 return null;
+            }else if(path.length === 2){
+                // x,y,offsetx,offsety,distance,delta,side,index
+                const dir = new Vector2(path[1][0]-path[0][0], path[1][1] - path[0][1]);
+                const len = dir.length();
+                dir.normalize();
+                const offsetX = -dir.y, offsetY = dir.x;
+                return {
+                    vertex: new Float64Array([
+                        path[0][0], path[0][1],  offsetX,  offsetY * -1,   0, 0,  1, 0,
+                        path[0][0], path[0][1], -offsetX, -offsetY * -1,   0, 0, -1, 0,
+                        path[1][0], path[1][1],  offsetX,  offsetY * -1, len, 0,  1, 1,
+                        path[1][0], path[1][1], -offsetX, -offsetY * -1, len, 0, -1, 1,
+                    ]),
+                    index: new Uint32Array([0,1,2,1,3,2]),
+                    totalDis: len
+                }
             }
 
             const ctxs = [];
@@ -278,48 +295,76 @@ define([
                     }
 
                     offset.addVectors(n1, n2).normalize();
-                    offset.multiplyScalar(1 / (n1.dot(offset) || 0.0001));
-                    c0.copy(offset).multiplyScalar(-1);// -offset
-                    c1.copy(c0).addScaledVector(n1, 2);// c0 + 2n1;
-                    c2.copy(c0).addScaledVector(n2, 2);// c0 + 2n2;
+                    const cos = n1.dot(offset);
+                    const isSameLine = cos < MinValue || Math.abs(cos - 1) <= precisionNear1;
+                    if (isSameLine) { //同向或180°折返
+                        offset.set(-lastDir.y, lastDir.x);
+                        ctxs.push({
+                            isCw,
+                            sameDir: cos > 0.5,
+                            common: {
+                                x: curPoint.x,
+                                y: curPoint.y,
+                                len: oldLen,
+                                index: i,
+                            },
+                            p1: {
+                                side: 1,
+                                offset: [offset.x, offset.y],
+                                delta: 0,
+                            },
+                            p2: {
+                                side: -1,
+                                offset: [-offset.x, -offset.y],
+                                delta: 0,
+                            },
+                        });
+                    } else {
+                        //round 圆角
+                        offset.multiplyScalar(1 / cos);
+                        c0.copy(offset).multiplyScalar(-1);// -offset
+                        c1.copy(c0).addScaledVector(n1, 2);// c0 + 2n1;
+                        c2.copy(c0).addScaledVector(n2, 2);// c0 + 2n2;
 
-                    const delta = temp.subVectors(offset, n1).length();
-                    const c0Side = isCw ? -1 : 1;
-                    const c1c2Side = isCw ? 1 : -1;
-                    //对n1,n2所夹的圆弧插值
-                    const sub = vecInterpolation(n1, n2, -delta, delta, isCw);
-                    vertexCount += sub.length * 2 - 1;
-                    indexCount += (sub.length - 1) * 3;
-                    sub.forEach(item => {
-                        //c0 + 2 * sub
-                        const [x, y] = item.vec;
-                        item.vec = [c0.x + x * 2, c0.y + y * 2]
-                    })
-                    ctxs.push({
-                        isCw: isCw,
-                        common: {
-                            x: curPoint.x,
-                            y: curPoint.y,
-                            len: oldLen, //长度
-                            index: i, //原始点索引
-                        },
-                        c0: {
-                            side: c0Side,
-                            offset: [c0.x, c0.y],
-                            delta: undefined, //动态值
-                        },
-                        c1: {
-                            side: c1c2Side,
-                            offset: [c1.x, c1.y],
-                            delta: -delta,
-                        },
-                        c2: {
-                            side: c1c2Side,
-                            offset: [c2.x, c2.y],
-                            delta: delta,
-                        },
-                        sub,
-                    });
+                        const delta = temp.subVectors(offset, n1).length();
+                        const c0Side = isCw ? -1 : 1;
+                        const c1c2Side = isCw ? 1 : -1;
+                        //对n1,n2所夹的圆弧插值
+                        const sub = vecInterpolation(n1, n2, -delta, delta, isCw);
+                        vertexCount += sub.length * 2 - 1;
+                        indexCount += (sub.length - 1) * 3;
+                        sub.forEach(item => {
+                            //c0 + 2 * sub
+                            const [x, y] = item.vec;
+                            item.vec = [c0.x + x * 2, c0.y + y * 2]
+                        })
+                        ctxs.push({
+                            isCw: isCw,
+                            common: {
+                                x: curPoint.x,
+                                y: curPoint.y,
+                                len: oldLen, //长度
+                                index: i, //原始点索引
+                            },
+                            c0: {
+                                side: c0Side,
+                                offset: [c0.x, c0.y],
+                                delta: undefined, //动态值
+                            },
+                            c1: {
+                                side: c1c2Side,
+                                offset: [c1.x, c1.y],
+                                delta: -delta,
+                            },
+                            c2: {
+                                side: c1c2Side,
+                                offset: [c2.x, c2.y],
+                                delta: delta,
+                            },
+                            sub,
+                        });
+                    }
+
                     lastDir.copy(curDir);
                 }
 
@@ -362,52 +407,67 @@ define([
                 const before = ctxs[i - 1];
                 const cur = ctxs[i];
                 const {p1, p2} = before;
-                const {c0, c1, c2, isCw, sub} = cur;
+                const {c0, c1, c2, isCw, sub, p1:cp1, p2:cp2} = cur;
 
-                //rect
-                const _c0 = {...cur.common, ...c0, delta: c1.delta},
-                    _c1 = {...cur.common, ...c1};
+                if (sub?.length) {
+                    //rect
+                    const _c0 = {...cur.common, ...c0, delta: c1.delta},
+                        _c1 = {...cur.common, ...c1};
 
-                cursor = vertexCursor;
-                writeVertex(vertexCursor++, {...before.common, ...p1});
-                writeVertex(vertexCursor++, {...before.common, ...p2});
-                writeVertex(vertexCursor++, isCw ? _c1 : _c0);
-                writeVertex(vertexCursor++, isCw ? _c0 : _c1);
-                pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
+                    cursor = vertexCursor;
+                    writeVertex(vertexCursor++, {...before.common, ...p1});
+                    writeVertex(vertexCursor++, {...before.common, ...p2});
+                    writeVertex(vertexCursor++, isCw ? _c1 : _c0);
+                    writeVertex(vertexCursor++, isCw ? _c0 : _c1);
+                    pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
 
-                //corner
-                cursor = vertexCursor;
-                const subCount = sub.length - 1; //份数
-                const subSide = isCw ? 1 : -1;
-                writeVertex(vertexCursor++, {
-                    ...cur.common,
-                    delta: sub[0].value,
-                    offset: sub[0].vec,
-                    side: subSide
-                });
-                for (let i = 1; i <= subCount; i++) {
-                    const beforeSub = sub[i - 1];
-                    const curSub = sub[i];
+                    //corner
+                    cursor = vertexCursor;
+                    const subCount = sub.length - 1; //份数
+                    const subSide = isCw ? 1 : -1;
                     writeVertex(vertexCursor++, {
                         ...cur.common,
-                        ...c0,
-                        delta: (beforeSub.value + curSub.value) / 2
+                        delta: sub[0].value,
+                        offset: sub[0].vec,
+                        side: subSide
                     });
-                    writeVertex(vertexCursor++, {
-                        ...cur.common,
-                        side: subSide,
-                        delta: curSub.value,
-                        offset: curSub.vec
-                    });
-                    const _cursor = cursor + i * 2;
-                    isCw ? pushIndex(_cursor - 2, _cursor - 1, _cursor)
-                        : pushIndex(_cursor, _cursor - 1, _cursor - 2);
+                    for (let i = 1; i <= subCount; i++) {
+                        const beforeSub = sub[i - 1];
+                        const curSub = sub[i];
+                        writeVertex(vertexCursor++, {
+                            ...cur.common,
+                            ...c0,
+                            delta: (beforeSub.value + curSub.value) / 2
+                        });
+                        writeVertex(vertexCursor++, {
+                            ...cur.common,
+                            side: subSide,
+                            delta: curSub.value,
+                            offset: curSub.vec
+                        });
+                        const _cursor = cursor + i * 2;
+                        isCw ? pushIndex(_cursor - 2, _cursor - 1, _cursor)
+                            : pushIndex(_cursor, _cursor - 1, _cursor - 2);
+                    }
+                    //update
+                    c0.delta = c2.delta;
+                    cur.p1 = isCw ? c2 : c0;
+                    cur.p2 = isCw ? c0 : c2;
+                }else{
+                    //非拐角
+                    cursor = vertexCursor;
+                    writeVertex(vertexCursor++, {...before.common, ...p1});
+                    writeVertex(vertexCursor++, {...before.common, ...p2});
+                    writeVertex(vertexCursor++, {...cur.common,...cp1});
+                    writeVertex(vertexCursor++, {...cur.common,...cp2});
+                    pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
+                    //180反向则交换p1, p2
+                    if(!cur.sameDir){
+                        const temp = cp1.offset;
+                        cp1.offset = cp2.offset;
+                        cp2.offset = temp;
+                    }
                 }
-
-                //update
-                c0.delta = c2.delta;
-                cur.p1 = isCw ? c2 : c0;
-                cur.p2 = isCw ? c0 : c2;
             }
 
             //for last point
@@ -421,7 +481,7 @@ define([
             pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
 
 
-            return {vertex:vertexBuffer, index:indexBuffer, totalDis: totalLength}
+            return {vertex: vertexBuffer, index: indexBuffer, totalDis: totalLength}
 
             function writeVertex(index, data) {
                 const i8 = index * 8;
@@ -484,13 +544,13 @@ define([
             }
             const transferList = [];
             const meshBuffers = tessellateLineRound(geometry);
-            meshBuffers.forEach(item=>{
+            meshBuffers.forEach(item => {
                 transferList.push(item.vertex.buffer);
                 transferList.push(item.index.buffer);
             })
             setCache(meshBuffers[0].vertex);
             return {
-                result:{
+                result: {
                     mesh: meshBuffers,
                     extent: geometry.extent.toJSON()
                 },

@@ -1,4 +1,4 @@
-import {loadFlowLineLayer,FlowLineLayerBuilder} from '@src/layer/FlowingLineLayer'
+import {loadFlowLineLayer,FlowLineLayerBuilder} from '@src/layer/FlowLineLayer'
 import {loadRasterColormapLayer,RasterColormapLayerBuilder} from "@src/layer/RasterColormapLayer";
 import {loadVectorFieldLayer,VectorFieldLayerBuilder} from "@src/layer/VectorFieldLayer";
 import {loadDataSeriesGraphicsLayer,DataSeriesGraphicsLayerBuilder} from "@src/layer/DataSeriesGraphicsLayer";

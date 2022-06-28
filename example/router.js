@@ -44,6 +44,11 @@ const routes = [
         name:'data-series-tin',
         component: SeriesTIN
     },
+    {
+        path:'/line-tessellate',
+        name:"line-tessellate",
+        component: () => import('./测试/折线剖分')
+    },
     { path: '*', redirect: '/flowing-line' }
 ];
 export const router = new VueRouter({
