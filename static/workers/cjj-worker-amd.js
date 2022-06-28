@@ -238,12 +238,25 @@ define([
                 const p2x = doubleToTwoFloats(path[1][0]);
                 const p2y = doubleToTwoFloats(path[1][1]);
                 return {
+                    vertexCount:4,
                     // hx,hy,lx,ly,offsetx,offsety,distance,delta,side,index
-                    vertex: new Float64Array([
-                        p1x[0], p1y[0], p1x[1], p1y[1],  offsetX,  offsetY * -1,  0,  0,  1, 0,
-                        p1x[0], p1y[0], p1x[1], p1y[1], -offsetX, -offsetY * -1,  0,  0, -1, 0,
-                        p2x[0], p2y[0], p2x[1], p2y[1],  offsetX,  offsetY * -1, len, 0,  1, 1,
-                        p2x[0], p2y[0], p2x[1], p2y[1], -offsetX, -offsetY * -1, len, 0, -1, 1,
+                    vPart1: new Float32Array([
+                        p1x[0], p1y[0], p1x[1], p1y[1],
+                        p1x[0], p1y[0], p1x[1], p1y[1],
+                        p2x[0], p2y[0], p2x[1], p2y[1],
+                        p2x[0], p2y[0], p2x[1], p2y[1],
+                    ]),
+                    vPart2: new Float32Array([
+                        offsetX, offsetY * -1, 0, 0,
+                        -offsetX, -offsetY * -1, 0, 0,
+                        offsetX, offsetY * -1, len, 0,
+                        -offsetX, -offsetY * -1, len, 0,
+                    ]),
+                    vPart3: new Float32Array([
+                        1, 0,
+                        -1, 0,
+                        1, 1,
+                        -1, 1,
                     ]),
                     index: new Uint32Array([0, 1, 2, 1, 3, 2]),
                     totalDis: len
@@ -421,7 +434,9 @@ define([
 
             let vertexCursor = 0, indexCursor = 0, cursor = null;
 
-            const vertexBuffer = new Float64Array(vertexCount * 10);
+            const vertexBuffer1 = new Float32Array(vertexCount * 4);
+            const vertexBuffer2 = new Float32Array(vertexCount * 4);
+            const vertexBuffer3 = new Float32Array(vertexCount * 2);
             const indexBuffer = new Uint32Array(indexCount);
 
 
@@ -504,23 +519,31 @@ define([
             pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
 
 
-            return {vertex: vertexBuffer, index: indexBuffer, totalDis: totalLength}
+            return {
+                vertexCount: vertexBuffer1.length / 4,
+                vPart1: vertexBuffer1,
+                vPart2: vertexBuffer2,
+                vPart3: vertexBuffer3,
+                index: indexBuffer,
+                totalDis: totalLength
+            }
 
             function writeVertex(index, data) {
-                const i = index * 10;
+                const i4 = index * 4, i2 = index * 2;
+                const i41 = i4 + 1, i42 = i4 + 2, i43 = i4 + 3;
                 const [hx, lx] = doubleToTwoFloats(data.x);
                 const [hy, ly] = doubleToTwoFloats(data.y);
                 // hx,hy,lx,ly,offsetx,offsety,distance,delta,side,index
-                vertexBuffer[i] = hx;
-                vertexBuffer[i + 1] = hy;
-                vertexBuffer[i + 2] = lx;
-                vertexBuffer[i + 3] = ly;
-                vertexBuffer[i + 4] = data.offset[0];
-                vertexBuffer[i + 5] = data.offset[1] * -1;
-                vertexBuffer[i + 6] = data.len;
-                vertexBuffer[i + 7] = data.delta;
-                vertexBuffer[i + 8] = data.side;
-                vertexBuffer[i + 9] = data.index;
+                vertexBuffer1[i4] = hx;
+                vertexBuffer1[i41] = hy;
+                vertexBuffer1[i42] = lx;
+                vertexBuffer1[i43] = ly;
+                vertexBuffer2[i4] = data.offset[0];
+                vertexBuffer2[i41] = data.offset[1] * -1;
+                vertexBuffer2[i42] = data.len;
+                vertexBuffer2[i43] = data.delta;
+                vertexBuffer3[i2] = data.side;
+                vertexBuffer3[i2 + 1] = data.index;
             }
 
             function pushIndex(...args) {
@@ -572,9 +595,11 @@ define([
             }
             const transferList = [];
             const meshBuffers = tessellateLineRound(geometry);
-            meshBuffers.forEach(item => {
-                transferList.push(item.vertex.buffer);
-                transferList.push(item.index.buffer);
+            meshBuffers.forEach(({vPart1, vPart2, vPart3, index}) => {
+                transferList.push(vPart1.buffer);
+                transferList.push(vPart2.buffer);
+                transferList.push(vPart3.buffer);
+                transferList.push(index.buffer);
             })
             return {
                 result: {

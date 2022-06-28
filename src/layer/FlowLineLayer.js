@@ -226,8 +226,8 @@ export async function FlowLineLayerBuilder() {
                         for (let i = 0; i < meshes.length; i++) {
                             const mesh = meshes[i].mesh;
                             for (let j = 0; j < mesh.length; j++) {
-                                const {vertex, index} = mesh[j];
-                                vertexCount += vertex.length / 10;
+                                const {vPart1, index} = mesh[j];
+                                vertexCount += vPart1.length / 4;
                                 indexCount += index.length;
                             }
                         }
@@ -360,12 +360,32 @@ export async function FlowLineLayerBuilder() {
         updateBufferData: function () {
             if (this.destroyed || !this.updateFlags.size) return;
             const {lineMesh, layer, useVertexColor, colorRamp: getPointColor} = this;
+
             const [min, r] = (() => {
                 if (useVertexColor) {
                     const range = layer.renderOpts.vertexColor.valueRange;
                     return [range[0], range[1] - range[0]]
                 } else {
                     return []
+                }
+            })();
+            const getVertexColor = (() => {
+                if (useVertexColor) {
+                    return ({pathIdx, colorIndex, vertexColor, vertexValue}) => {
+                        if (vertexColor) {
+                            const value = vertexColor?.[pathIdx]?.[colorIndex];
+                            if (!isNil(value)) {
+                                return new Color(value);
+                            }
+                        } else {
+                            const value = vertexValue?.[pathIdx]?.[colorIndex];
+                            if (!isNil(value) && !isNaN(value)) {
+                                return getPointColor(MathUtils.clamp((value - min) / r, 0, 1));
+                            }
+                        }
+                    }
+                } else {
+                    return undefined;
                 }
             })();
 
@@ -399,30 +419,9 @@ export async function FlowLineLayerBuilder() {
                     : new Uint16BufferAttribute(new Uint16Array(indexCount), 1);
             }
 
-            //graphic
-            const getVertexColor = (() => {
-                if (useVertexColor) {
-                    return ({pathIdx, colorIndex, vertexColor, vertexValue}) => {
-                        if (vertexColor) {
-                            const value = vertexColor?.[pathIdx]?.[colorIndex];
-                            if (!isNil(value)) {
-                                return new Color(value);
-                            }
-                        } else {
-                            const value = vertexValue?.[pathIdx]?.[colorIndex];
-                            if (!isNil(value) && !isNaN(value)) {
-                                return getPointColor(MathUtils.clamp((value - min) / r, 0, 1));
-                            }
-                        }
-                    }
-                } else {
-                    return undefined;
-                }
-            })();
-            console.time('xx')
             this.hasFlow = dataChange ? dataUpdateFn(this.meshes, lineMesh.geometry, getVertexColor)
                 : appearUpdateFn(this.meshes, lineMesh.geometry, getVertexColor);
-            console.timeEnd('xx')
+
             this.updateFlags.clear();
 
 
@@ -476,11 +475,17 @@ export async function FlowLineLayerBuilder() {
 
                         for (let i = 0,
                                  totalDis = mesh[pathIdx].totalDis,
-                                 vertex = mesh[pathIdx].vertex,
-                                 len = vertex.length / 10,
+                                 vPart1 = mesh[pathIdx].vPart1,
+                                 vPart2 = mesh[pathIdx].vPart2,
+                                 vPart3 = mesh[pathIdx].vPart3,
+                                 len = mesh[pathIdx].vertexCount,
                                  renderStyle = resolveStyle
                             ; i < len; ++i) {
-                            const ii = i * 10,
+                            const i2 = i * 2,
+                                i4 = i * 4,
+                                i41 = i4 + 1,
+                                i42 = i4 + 2,
+                                i43 = i4 + 3,
                                 c4 = vertexCursor * 4,
                                 c2 = vertexCursor * 2,
                                 c41 = c4 + 1,
@@ -488,18 +493,19 @@ export async function FlowLineLayerBuilder() {
                                 c43 = c4 + 3;
 
                             // vertex: hx,hy,lx,ly,offsetx,offsety,distance,delta,side,pointIndex
-                            posBuf[c4] = vertex[ii];//hx
-                            posBuf[c41] = vertex[ii + 1]//hy
-                            posBuf[c42] = vertex[ii + 2]//lx
-                            posBuf[c43] = vertex[ii + 3]//ly
+                            posBuf[c4] = vPart1[i4];//hx
+                            posBuf[c41] = vPart1[i41]//hy
+                            posBuf[c42] = vPart1[i42]//lx
+                            posBuf[c43] = vPart1[i43]//ly
 
-                            offsetBuf[c2] = vertex[ii + 4];
-                            offsetBuf[c2 + 1] = vertex[ii + 5];
+                            offsetBuf[c2] = vPart2[i4];
+                            offsetBuf[c2 + 1] = vPart2[i41];
 
-                            disInfoBuf[c4] = vertex[ii + 6];
+                            disInfoBuf[c4] = vPart2[i42];
                             disInfoBuf[c41] = totalDis;
-                            disInfoBuf[c42] = vertex[ii + 7];
-                            disInfoBuf[c43] = vertex[ii + 8];
+                            disInfoBuf[c42] = vPart2[i43];
+
+                            disInfoBuf[c43] = vPart3[i2];
 
                             pickColorBuf[c4] = pickColor[0];
                             pickColorBuf[c41] = pickColor[1];
@@ -511,7 +517,7 @@ export async function FlowLineLayerBuilder() {
 
                             const color = getColor?.({
                                 pathIdx: pathIdx,
-                                colorIndex: vertex[ii + 9],
+                                colorIndex: vPart3[i2 + 1],
                                 vertexColor: graphic.vertexColor,
                                 vertexValue: graphic.vertexValue
                             }) || renderStyle.lineColor;
@@ -563,15 +569,13 @@ export async function FlowLineLayerBuilder() {
                     for (let pathIdx = 0,
                              pathCount = mesh.length
                         ; pathIdx < pathCount; pathIdx++) {
-                        //path tessellate data
-                        const {vertex} = mesh[pathIdx];
 
                         for (let i = 0,
-                                 len = vertex.length / 10,
+                                 vPart3 = mesh[pathIdx].vPart3,
+                                 len = mesh[pathIdx].vertexCount,
                                  renderStyle = resolveStyle
                             ; i < len; ++i) {
-                            const ii = i * 10,
-                                c4 = vertexCursor * 4,
+                            const c4 = vertexCursor * 4,
                                 c41 = c4 + 1,
                                 c42 = c4 + 2,
                                 c43 = c4 + 3;
@@ -580,7 +584,7 @@ export async function FlowLineLayerBuilder() {
 
                             const color = getColor?.({
                                 pathIdx: pathIdx,
-                                colorIndex: vertex[ii + 9],
+                                colorIndex: vPart3[i * 2 + 1],
                                 vertexColor: graphic.vertexColor,
                                 vertexValue: graphic.vertexValue
                             }) || renderStyle.lineColor;
