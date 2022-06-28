@@ -7,6 +7,22 @@ define([
         return x + (y - x) * a;
     }
 
+    function doubleToTwoFloats(value) {
+        let high, low, tempHigh;
+        if (value >= 0) {
+            if (value < 65536) return [0, value];
+            tempHigh = Math.floor(value / 65536) * 65536;
+            high = tempHigh;
+            low = value - tempHigh;
+        } else {
+            if (value > -65536) return [0, value];
+            tempHigh = Math.floor(-value / 65536) * 65536;
+            high = -tempHigh;
+            low = value + tempHigh;
+        }
+        return [high, low];
+    }
+
     function id2RGBA(id) {
         return [
             ((id >> 0) & 0xFF), //r
@@ -198,9 +214,10 @@ define([
         }
     }
 
+
     const SplitPerAngle = 15 / 180 * Math.PI;
-    const MinValue = 2**-1074;
-    const precisionNear1 = 2**-53; // double 0.5-1之间的精度
+    const MinValue = 2 ** -1074;
+    const precisionNear1 = 2 ** -53; // double 0.5-1之间的精度
     function tessellateLineRound(geometry) {
         if (geometry.type.toLowerCase() !== 'polyline') throw new Error('geometry type is not polyline');
         return geometry.paths.map(_tessellatePath);
@@ -209,20 +226,26 @@ define([
             if (path.length < 2) {
                 console.warn(`path's point length < 2, ignored`);
                 return null;
-            }else if(path.length === 2){
-                // x,y,offsetx,offsety,distance,delta,side,index
-                const dir = new Vector2(path[1][0]-path[0][0], path[1][1] - path[0][1]);
+            } else if (path.length === 2) {
+
+                const dir = new Vector2(path[1][0] - path[0][0], path[1][1] - path[0][1]);
                 const len = dir.length();
                 dir.normalize();
                 const offsetX = -dir.y, offsetY = dir.x;
+
+                const p1x = doubleToTwoFloats(path[0][0]);
+                const p1y = doubleToTwoFloats(path[0][1]);
+                const p2x = doubleToTwoFloats(path[1][0]);
+                const p2y = doubleToTwoFloats(path[1][1]);
                 return {
+                    // hx,hy,lx,ly,offsetx,offsety,distance,delta,side,index
                     vertex: new Float64Array([
-                        path[0][0], path[0][1],  offsetX,  offsetY * -1,   0, 0,  1, 0,
-                        path[0][0], path[0][1], -offsetX, -offsetY * -1,   0, 0, -1, 0,
-                        path[1][0], path[1][1],  offsetX,  offsetY * -1, len, 0,  1, 1,
-                        path[1][0], path[1][1], -offsetX, -offsetY * -1, len, 0, -1, 1,
+                        p1x[0], p1y[0], p1x[1], p1y[1],  offsetX,  offsetY * -1,  0,  0,  1, 0,
+                        p1x[0], p1y[0], p1x[1], p1y[1], -offsetX, -offsetY * -1,  0,  0, -1, 0,
+                        p2x[0], p2y[0], p2x[1], p2y[1],  offsetX,  offsetY * -1, len, 0,  1, 1,
+                        p2x[0], p2y[0], p2x[1], p2y[1], -offsetX, -offsetY * -1, len, 0, -1, 1,
                     ]),
-                    index: new Uint32Array([0,1,2,1,3,2]),
+                    index: new Uint32Array([0, 1, 2, 1, 3, 2]),
                     totalDis: len
                 }
             }
@@ -397,8 +420,8 @@ define([
             }
 
             let vertexCursor = 0, indexCursor = 0, cursor = null;
-            // x,y,offsetx,offsety,distance,delta,side,index
-            const vertexBuffer = new Float64Array(vertexCount * 8);
+
+            const vertexBuffer = new Float64Array(vertexCount * 10);
             const indexBuffer = new Uint32Array(indexCount);
 
 
@@ -407,7 +430,7 @@ define([
                 const before = ctxs[i - 1];
                 const cur = ctxs[i];
                 const {p1, p2} = before;
-                const {c0, c1, c2, isCw, sub, p1:cp1, p2:cp2} = cur;
+                const {c0, c1, c2, isCw, sub, p1: cp1, p2: cp2} = cur;
 
                 if (sub?.length) {
                     //rect
@@ -453,16 +476,16 @@ define([
                     c0.delta = c2.delta;
                     cur.p1 = isCw ? c2 : c0;
                     cur.p2 = isCw ? c0 : c2;
-                }else{
+                } else {
                     //非拐角
                     cursor = vertexCursor;
                     writeVertex(vertexCursor++, {...before.common, ...p1});
                     writeVertex(vertexCursor++, {...before.common, ...p2});
-                    writeVertex(vertexCursor++, {...cur.common,...cp1});
-                    writeVertex(vertexCursor++, {...cur.common,...cp2});
+                    writeVertex(vertexCursor++, {...cur.common, ...cp1});
+                    writeVertex(vertexCursor++, {...cur.common, ...cp2});
                     pushIndex(cursor, cursor + 1, cursor + 2, cursor + 1, cursor + 3, cursor + 2);
                     //180反向则交换p1, p2
-                    if(!cur.sameDir){
+                    if (!cur.sameDir) {
                         const temp = cp1.offset;
                         cp1.offset = cp2.offset;
                         cp2.offset = temp;
@@ -484,15 +507,20 @@ define([
             return {vertex: vertexBuffer, index: indexBuffer, totalDis: totalLength}
 
             function writeVertex(index, data) {
-                const i8 = index * 8;
-                vertexBuffer[i8] = data.x;
-                vertexBuffer[i8 + 1] = data.y;
-                vertexBuffer[i8 + 2] = data.offset[0];
-                vertexBuffer[i8 + 3] = data.offset[1] * -1;
-                vertexBuffer[i8 + 4] = data.len;
-                vertexBuffer[i8 + 5] = data.delta;
-                vertexBuffer[i8 + 6] = data.side;
-                vertexBuffer[i8 + 7] = data.index;
+                const i = index * 10;
+                const [hx, lx] = doubleToTwoFloats(data.x);
+                const [hy, ly] = doubleToTwoFloats(data.y);
+                // hx,hy,lx,ly,offsetx,offsety,distance,delta,side,index
+                vertexBuffer[i] = hx;
+                vertexBuffer[i + 1] = hy;
+                vertexBuffer[i + 2] = lx;
+                vertexBuffer[i + 3] = ly;
+                vertexBuffer[i + 4] = data.offset[0];
+                vertexBuffer[i + 5] = data.offset[1] * -1;
+                vertexBuffer[i + 6] = data.len;
+                vertexBuffer[i + 7] = data.delta;
+                vertexBuffer[i + 8] = data.side;
+                vertexBuffer[i + 9] = data.index;
             }
 
             function pushIndex(...args) {
@@ -548,7 +576,6 @@ define([
                 transferList.push(item.vertex.buffer);
                 transferList.push(item.index.buffer);
             })
-            setCache(meshBuffers[0].vertex);
             return {
                 result: {
                     mesh: meshBuffers,

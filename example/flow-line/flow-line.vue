@@ -184,6 +184,7 @@ export default {
                     vertexColor: VERTEX_COLOR
                 }
             });
+            console.log(ly, [...ly.graphics._items])
             return ly
         }
     }

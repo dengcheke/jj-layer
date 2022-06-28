@@ -22,6 +22,8 @@ import {
     OrthographicCamera,
     RawShaderMaterial,
     SrcAlphaFactor,
+    Uint16BufferAttribute,
+    Uint32BufferAttribute,
     Uint8ClampedBufferAttribute,
     Vector2,
     Vector4,
@@ -225,7 +227,7 @@ export async function FlowLineLayerBuilder() {
                             const mesh = meshes[i].mesh;
                             for (let j = 0; j < mesh.length; j++) {
                                 const {vertex, index} = mesh[j];
-                                vertexCount += vertex.length / 8;
+                                vertexCount += vertex.length / 10;
                                 indexCount += index.length;
                             }
                         }
@@ -291,7 +293,7 @@ export async function FlowLineLayerBuilder() {
                                 r: buffer[i], //r
                                 g: buffer[i + 1], //g
                                 b: buffer[i + 2], //b
-                                a: buffer[i + 3], //a
+                                a: buffer[i + 3] / 255, //a
                             }
                         }
                         this.updateFlags.add(Flags.appear);
@@ -366,7 +368,6 @@ export async function FlowLineLayerBuilder() {
                     return []
                 }
             })();
-            const {renderOpts} = layer;
 
             const dataChange = this.updateFlags.has(Flags.data),
                 appearChange = dataChange || this.updateFlags.has(Flags.appear);
@@ -392,136 +393,219 @@ export async function FlowLineLayerBuilder() {
                         name,
                         new ctor(new typeArr(itemSize * vertexCount), itemSize, normalized)
                     );
-                })
+                });
+                geometry.index = vertexCount > 65535
+                    ? new Uint32BufferAttribute(new Uint32Array(indexCount), 1)
+                    : new Uint16BufferAttribute(new Uint16Array(indexCount), 1);
             }
-            const geometry = lineMesh.geometry;
-            const posBuf = geometry.getAttribute('a_position').array;
-            const offsetBuf = geometry.getAttribute('a_offset').array;
-            const disInfoBuf = geometry.getAttribute('a_dis_info').array;
 
-            const widthBuf = geometry.getAttribute('a_width').array;
-            const colorBuf = geometry.getAttribute('a_color').array;
-            const visibleBuf = geometry.getAttribute('a_visible').array;
-            const pickColorBuf = geometry.getAttribute('a_pick_color').array;
-            const trailBuf = geometry.getAttribute('a_trail').array;
-
-            const indexData = new Array(indexCount);
-
-            let currentVertex = 0;
-            let currentIndex = 0;
-
-            let hasFlow = false;
             //graphic
-            for (let meshIndex = 0; meshIndex < this.meshes.length; ++meshIndex) {
-                const item = this.meshes[meshIndex];
-                const {mesh, pickId, graphic} = item,
-                    lineStyle = graphic.lineStyle || {},
-                    pickColor = dataChange ? id2RGBA(pickId) : null,
-                    vertexColor = graphic.vertexColor,
-                    vertexValue = graphic.vertexValue;
-                const visible = graphic.visible ? 1 : 0;
-                const flow = !!parseValueNotNil(lineStyle.flow, !!renderOpts.flow);
-                hasFlow = hasFlow || flow;
-                const width = lineStyle.width || renderOpts.width;
-                const minAlpha = flow ? (lineStyle.minAlpha || renderOpts.minAlpha) : 1.0;
-                const speed = lineStyle.speed || renderOpts.speed;
-                const length = lineStyle.length || renderOpts.length;
-                const cycle = lineStyle.cycle || renderOpts.cycle;
-                const lineColor = appearChange ? new Color(lineStyle.color || renderOpts.color) : null
-                lineColor && (lineColor.a *= 255);
-                //subpath
-                for (let pathIdx = 0; pathIdx < mesh.length; pathIdx++) {
-                    const {index, vertex, totalDis} = mesh[pathIdx];
-                    if (dataChange) {
-                        for (let i = 0; i < index.length; ++i) {
-                            let idx = index[i];
-                            indexData[currentIndex] = currentVertex + idx;
-                            currentIndex++;
+            const getVertexColor = (() => {
+                if (useVertexColor) {
+                    return ({pathIdx, colorIndex, vertexColor, vertexValue}) => {
+                        if (vertexColor) {
+                            const value = vertexColor?.[pathIdx]?.[colorIndex];
+                            if (!isNil(value)) {
+                                return new Color(value);
+                            }
+                        } else {
+                            const value = vertexValue?.[pathIdx]?.[colorIndex];
+                            if (!isNil(value) && !isNaN(value)) {
+                                return getPointColor(MathUtils.clamp((value - min) / r, 0, 1));
+                            }
                         }
                     }
-                    for (let i = 0, len = vertex.length / 8; i < len; ++i) {
-                        const i8 = i * 8,
-                            c4 = currentVertex * 4,
-                            c2 = currentVertex * 2,
-                            c41 = c4 + 1,
-                            c42 = c4 + 2,
-                            c43 = c4 + 3;
+                } else {
+                    return undefined;
+                }
+            })();
+            console.time('xx')
+            this.hasFlow = dataChange ? dataUpdateFn(this.meshes, lineMesh.geometry, getVertexColor)
+                : appearUpdateFn(this.meshes, lineMesh.geometry, getVertexColor);
+            console.timeEnd('xx')
+            this.updateFlags.clear();
 
-                        // vertex: x,y,offsetx,offsety,distance,delta,side,index
-                        if (dataChange) {
-                            const [hx, lx] = doubleToTwoFloats(vertex[i8]);
-                            const [hy, ly] = doubleToTwoFloats(vertex[i8 + 1]);
-                            posBuf[c4] = hx;
-                            posBuf[c41] = hy;
-                            posBuf[c42] = lx;
-                            posBuf[c43] = ly;
 
-                            offsetBuf[c2] = vertex[i8 + 2];
-                            offsetBuf[c2 + 1] = vertex[i8 + 3];
+            function dataUpdateFn(meshes, geometry, getColor) {
+                let hasFlow = false;
 
-                            disInfoBuf[c4] = vertex[i8 + 4];
+                for (let meshIndex = meshes.length,
+                         vertexCursor = 0,
+                         indexCursor = 0,
+                         renderOpts = layer.renderOpts,
+                         indexBuf = geometry.index.array,
+                         posBuf = geometry.getAttribute('a_position').array,
+                         offsetBuf = geometry.getAttribute('a_offset').array,
+                         disInfoBuf = geometry.getAttribute('a_dis_info').array,
+
+                         widthBuf = geometry.getAttribute('a_width').array,
+                         colorBuf = geometry.getAttribute('a_color').array,
+                         visibleBuf = geometry.getAttribute('a_visible').array,
+                         pickColorBuf = geometry.getAttribute('a_pick_color').array,
+                         trailBuf = geometry.getAttribute('a_trail').array
+                    ; meshIndex--;) {
+                    const item = meshes[meshIndex];
+                    const {mesh, pickId, graphic} = item,
+                        lineStyle = graphic.lineStyle || {},
+                        pickColor = id2RGBA(pickId);
+
+                    const flow = !!parseValueNotNil(lineStyle.flow, !!renderOpts.flow);
+                    hasFlow = hasFlow || flow;
+
+                    const resolveStyle = {
+                        visible: graphic.visible ? 1 : 0,
+                        flow: flow,
+                        width: lineStyle.width || renderOpts.width,
+                        minAlpha: flow ? (lineStyle.minAlpha || renderOpts.minAlpha) : 1.0,
+                        speed: lineStyle.speed || renderOpts.speed,
+                        length: lineStyle.length || renderOpts.length,
+                        cycle: lineStyle.cycle || renderOpts.cycle,
+                        lineColor: new Color(lineStyle.color || renderOpts.color)
+                    }
+                    //sub path
+                    for (let pathIdx = 0, pathCount = mesh.length; pathIdx < pathCount; pathIdx++) {
+
+                        //update index
+                        for (let i = 0,
+                                 index = mesh[pathIdx].index,
+                                 len = index.length
+                            ; i < len; ++i) {
+                            indexBuf[indexCursor] = vertexCursor + index[i];
+                            indexCursor++;
+                        }
+
+                        for (let i = 0,
+                                 totalDis = mesh[pathIdx].totalDis,
+                                 vertex = mesh[pathIdx].vertex,
+                                 len = vertex.length / 10,
+                                 renderStyle = resolveStyle
+                            ; i < len; ++i) {
+                            const ii = i * 10,
+                                c4 = vertexCursor * 4,
+                                c2 = vertexCursor * 2,
+                                c41 = c4 + 1,
+                                c42 = c4 + 2,
+                                c43 = c4 + 3;
+
+                            // vertex: hx,hy,lx,ly,offsetx,offsety,distance,delta,side,pointIndex
+                            posBuf[c4] = vertex[ii];//hx
+                            posBuf[c41] = vertex[ii + 1]//hy
+                            posBuf[c42] = vertex[ii + 2]//lx
+                            posBuf[c43] = vertex[ii + 3]//ly
+
+                            offsetBuf[c2] = vertex[ii + 4];
+                            offsetBuf[c2 + 1] = vertex[ii + 5];
+
+                            disInfoBuf[c4] = vertex[ii + 6];
                             disInfoBuf[c41] = totalDis;
-                            disInfoBuf[c42] = vertex[i8 + 5];
-                            disInfoBuf[c43] = vertex[i8 + 6];
+                            disInfoBuf[c42] = vertex[ii + 7];
+                            disInfoBuf[c43] = vertex[ii + 8];
 
                             pickColorBuf[c4] = pickColor[0];
                             pickColorBuf[c41] = pickColor[1];
                             pickColorBuf[c42] = pickColor[2];
                             pickColorBuf[c43] = pickColor[3];
+
+
+                            widthBuf[vertexCursor] = renderStyle.width;
+
+                            const color = getColor?.({
+                                pathIdx: pathIdx,
+                                colorIndex: vertex[ii + 9],
+                                vertexColor: graphic.vertexColor,
+                                vertexValue: graphic.vertexValue
+                            }) || renderStyle.lineColor;
+                            colorBuf[c4] = color.r;
+                            colorBuf[c41] = color.g;
+                            colorBuf[c42] = color.b;
+                            colorBuf[c43] = color.a * 255;
+
+                            trailBuf[c4] = renderStyle.minAlpha;
+                            trailBuf[c41] = renderStyle.speed;
+                            trailBuf[c42] = renderStyle.length;
+                            trailBuf[c43] = renderStyle.cycle;
+
+                            visibleBuf[vertexCursor] = renderStyle.visible;
+                            vertexCursor++;
                         }
-
-                        if (appearChange) {
-                            widthBuf[currentVertex] = width;
-
-                            let _color = lineColor;
-
-                            if (useVertexColor) {
-                                if (vertexColor) {
-                                    const value = vertexColor[pathIdx]?.[vertex[i8 + 7]];
-                                    if (!isNil(value)) {
-                                        _color = new Color(value);
-                                        _color.a *= 255;
-                                    }
-                                } else {
-                                    const value = vertexValue?.[pathIdx]?.[vertex[i8 + 7]];
-                                    if (!isNil(value) && !isNaN(value)) {
-                                        _color = getPointColor(MathUtils.clamp((value - min) / r, 0, 1));
-                                    }
-                                }
-                            }
-
-                            colorBuf[c4] = _color.r;
-                            colorBuf[c41] = _color.g;
-                            colorBuf[c42] = _color.b;
-                            colorBuf[c43] = _color.a;
-
-                            trailBuf[c4] = minAlpha;
-                            trailBuf[c41] = speed;
-                            trailBuf[c42] = length;
-                            trailBuf[c43] = cycle;
-
-                            visibleBuf[currentVertex] = visible;
-                        }
-
-                        currentVertex++;
                     }
                 }
+                return hasFlow;
             }
 
-            if (dataChange) {
-                for (let attr in geometry.attributes) {
-                    geometry.getAttribute(attr).needsUpdate = true;
+            function appearUpdateFn(meshes, geometry, getColor) {
+                let hasFlow = false;
+                for (let meshIndex = meshes.length,
+                         vertexCursor = 0,
+                         renderOpts = layer.renderOpts,
+                         widthBuf = geometry.getAttribute('a_width').array,
+                         colorBuf = geometry.getAttribute('a_color').array,
+                         visibleBuf = geometry.getAttribute('a_visible').array,
+                         trailBuf = geometry.getAttribute('a_trail').array
+                    ; meshIndex--;) {
+                    const item = meshes[meshIndex];
+                    const {mesh, graphic} = item,
+                        lineStyle = graphic.lineStyle || {};
+
+                    const flow = !!parseValueNotNil(lineStyle.flow, !!renderOpts.flow);
+                    hasFlow = hasFlow || flow;
+                    const resolveStyle = {
+                        visible: graphic.visible ? 1 : 0,
+                        flow: flow,
+                        width: lineStyle.width || renderOpts.width,
+                        minAlpha: flow ? (lineStyle.minAlpha || renderOpts.minAlpha) : 1.0,
+                        speed: lineStyle.speed || renderOpts.speed,
+                        length: lineStyle.length || renderOpts.length,
+                        cycle: lineStyle.cycle || renderOpts.cycle,
+                        lineColor: new Color(lineStyle.color || renderOpts.color)
+                    }
+                    //sub path
+                    for (let pathIdx = 0,
+                             pathCount = mesh.length
+                        ; pathIdx < pathCount; pathIdx++) {
+                        //path tessellate data
+                        const {vertex} = mesh[pathIdx];
+
+                        for (let i = 0,
+                                 len = vertex.length / 10,
+                                 renderStyle = resolveStyle
+                            ; i < len; ++i) {
+                            const ii = i * 10,
+                                c4 = vertexCursor * 4,
+                                c41 = c4 + 1,
+                                c42 = c4 + 2,
+                                c43 = c4 + 3;
+
+                            widthBuf[vertexCursor] = renderStyle.width;
+
+                            const color = getColor?.({
+                                pathIdx: pathIdx,
+                                colorIndex: vertex[ii + 9],
+                                vertexColor: graphic.vertexColor,
+                                vertexValue: graphic.vertexValue
+                            }) || renderStyle.lineColor;
+
+                            colorBuf[c4] = color.r;
+                            colorBuf[c41] = color.g;
+                            colorBuf[c42] = color.b;
+                            colorBuf[c43] = color.a * 255;
+
+                            trailBuf[c4] = renderStyle.minAlpha;
+                            trailBuf[c41] = renderStyle.speed;
+                            trailBuf[c42] = renderStyle.length;
+                            trailBuf[c43] = renderStyle.cycle;
+
+                            visibleBuf[vertexCursor] = renderStyle.visible;
+                            vertexCursor++;
+                        }
+                    }
                 }
+                geometry.getAttribute('a_width').needsUpdate = true;
+                geometry.getAttribute('a_color').needsUpdate = true;
+                geometry.getAttribute('a_visible').needsUpdate = true;
+                geometry.getAttribute('a_trail').needsUpdate = true;
+                return hasFlow;
             }
-            if (appearChange) {
-                ['a_width', 'a_color', 'a_visible', 'a_trail'].map(name => {
-                    geometry.getAttribute(name).needsUpdate = true;
-                })
-            }
-
-            dataChange && geometry.setIndex(indexData);
-            this.updateFlags.clear();
-            this.hasFlow = hasFlow;
         },
 
         updateRenderParams(state) {
