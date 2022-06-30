@@ -654,7 +654,7 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
 
     const sampler = createSampler(data);
     const paths = buildRasterPaths(setting, sampler);
-    const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths);
+    const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths, setting);
     return {
         result: {
             buffer1: buffer1.buffer,
@@ -672,7 +672,8 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
         ]
     }
 
-    function toBuffer(paths) {
+    function toBuffer(paths,{limitRange}) {
+        const [xmin, xmax, ymin, ymax] = limitRange;
         let segmentCount = 0;
         for (let i = 0; i < paths.length; i++) {
             segmentCount += paths[i].length - 1;
@@ -695,15 +696,16 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
                 const p1 = path[j];
                 const p2 = path[j + 1];
                 const p3 = j === limit ? path[j + 1] : path[j + 2];
-                buffer1[c] = p0.x;
-                buffer1[c1] = p0.y;
-                buffer1[c2] = p1.x;
-                buffer1[c3] = p1.y;
+                //转换为相对于剖分范围左上角的相对坐标,
+                buffer1[c] = p0.x - xmin;
+                buffer1[c1] = p0.y - ymax;
+                buffer1[c2] = p1.x - xmin;
+                buffer1[c3] = p1.y - ymax;
 
-                buffer2[c] = p2.x;
-                buffer2[c1] = p2.y;
-                buffer2[c2] = p3.x;
-                buffer2[c3] = p3.y;
+                buffer2[c] = p2.x - xmin;
+                buffer2[c1] = p2.y - ymax;
+                buffer2[c2] = p3.x - xmin;
+                buffer2[c3] = p3.y - ymax;
 
                 buffer3[c] = p1.t;
                 buffer3[c1] = p2.t;

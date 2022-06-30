@@ -84,6 +84,8 @@ export async function RasterFlowLineLayerBuilder() {
             this.useColorStops = false;
 
             this.connect = null;
+
+            this.curSetting = null;
         },
 
         attach: function () {
@@ -229,7 +231,7 @@ export async function RasterFlowLineLayerBuilder() {
             const check2 = createVersionChecker('其他');
             const joinCheck = joinChecker(check1, check2);
 
-            /* 基本原理
+            /*
             *  1.在矢量栅格上放置若干个点作为路径起始点.
             *  2.从每个起点开始, 延伸出一条路径.
             */
@@ -238,7 +240,7 @@ export async function RasterFlowLineLayerBuilder() {
                 const {extent, width, height} = this.rasterData;
                 // cell = 矢量栅格单元(像素)
                 const disPerCell = extent.width / width; //一个栅格像素距离
-                const pixelPerCell = Math.min(disPerCell / this.view.state.resolution, 5000);//一个栅格像素等于多少个屏幕像素
+                const pixelPerCell = disPerCell / this.view.state.resolution;//一个栅格像素等于多少个屏幕像素
 
                 // 动态路径种子放置间距,
                 const spacing = 10 / pixelPerCell;
@@ -271,7 +273,8 @@ export async function RasterFlowLineLayerBuilder() {
                     mergeLines: true, //合并线条
                     minSpeedThreshold: 0.001, //最小速度阈值
 
-                    limitRange: [xmin, xmax, ymin, ymax]
+                    limitRange: [xmin, xmax, ymin, ymax], //网格坐标系, x向右, y向上
+                    limitExtent,
                 }
             }
             const processData = () => {
@@ -294,15 +297,14 @@ export async function RasterFlowLineLayerBuilder() {
                 return true;
             }
             const computeBufferData = async setting => {
-                /*const res = await this.asyncCreateRasterFlowLineMesh({
-                    data: this.rasterData,
-                    setting: setting
-                });*/
-                const res = this.syncCreateRasterFlowLineMesh({
+                return this.asyncCreateRasterFlowLineMesh({
                     data: this.rasterData,
                     setting: setting
                 });
-                return res;
+                /*return this.syncCreateRasterFlowLineMesh({
+                    data: this.rasterData,
+                    setting: setting
+                });*/
             }
             const updateBufferData = ({buffer1, buffer2, buffer3, buffer4}) => {
                 if (this.destroyed) return;
@@ -325,7 +327,10 @@ export async function RasterFlowLineLayerBuilder() {
                 if (!setting) return;
                 joinCheck(computeBufferData(setting))
                     .then(bufferData => {
-                        updateBufferData(bufferData) && this.requestRender();
+                        if (updateBufferData(bufferData)) {
+                            this.curSetting = setting;
+                            this.requestRender();
+                        }
                     }).catch(versionErrCatch)
             }, 200, {leading: false, trailing: true})
 
@@ -445,11 +450,14 @@ export async function RasterFlowLineLayerBuilder() {
                     _mat3.identity().translate(-1, 1)
                 )
 
+            const limitExtent = this.curSetting.limitExtent;
+
+            //以当前剖分范围的左上角为基准, 解决高等级缩放时的精度问题
             const point = view.toScreen({
                 spatialReference: fullExtent.spatialReference,
-                x: fullExtent.xmin,
-                y: fullExtent.ymax
-            })
+                x: limitExtent.xmin,
+                y: limitExtent.ymin
+            });
             const disPerCell = fullExtent.width / rasterData.width;
             const pixelPerCell = disPerCell / state.resolution;
             const angle = -state.rotation * Math.PI / 180;
@@ -493,12 +501,12 @@ export async function RasterFlowLineLayerBuilder() {
                 }
                 data.speedRange = [min, max];
             }
-            const maxSpeed = data.speedRange[1];
             const sampler = createSampler(data);
             const paths = buildRasterPaths(setting, sampler);
-            return toBuffer(paths)
+            return toBuffer(paths, setting)
 
-            function toBuffer(paths) {
+            function toBuffer(paths, {limitRange}) {
+                const [xmin, xmax, ymin, ymax] = limitRange;
                 let segmentCount = 0;
                 for (let i = 0; i < paths.length; i++) {
                     segmentCount += paths[i].length - 1;
@@ -521,15 +529,15 @@ export async function RasterFlowLineLayerBuilder() {
                         const p1 = path[j];
                         const p2 = path[j + 1];
                         const p3 = j === limit ? path[j + 1] : path[j + 2];
-                        buffer1[c] = p0.x;
-                        buffer1[c1] = p0.y;
-                        buffer1[c2] = p1.x;
-                        buffer1[c3] = p1.y;
+                        buffer1[c] = p0.x - xmin;
+                        buffer1[c1] = p0.y - ymax;
+                        buffer1[c2] = p1.x - xmin;
+                        buffer1[c3] = p1.y - ymax;
 
-                        buffer2[c] = p2.x;
-                        buffer2[c1] = p2.y;
-                        buffer2[c2] = p3.x;
-                        buffer2[c3] = p3.y;
+                        buffer2[c] = p2.x - xmin;
+                        buffer2[c1] = p2.y - ymax;
+                        buffer2[c2] = p3.x - xmin;
+                        buffer2[c3] = p3.y - ymax;
 
                         buffer3[c] = p1.t;
                         buffer3[c1] = p2.t;
