@@ -10,6 +10,7 @@ function id2RGBA(id) {
         ((id >> 24) & 0xFF) //a
     ]
 }
+
 function doubleToTwoFloats(value) {
     let high, low, tempHigh;
     if (value >= 0) {
@@ -25,12 +26,15 @@ function doubleToTwoFloats(value) {
     }
     return [high, low];
 }
+
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
+
 function mix(x, y, a) {
     return x + (y - x) * a;
 }
+
 class Vector2 {
     constructor(x = 0, y = 0) {
 
@@ -211,19 +215,21 @@ class Vector2 {
 
 let id = 1;
 const map = new Map();
-export function setCache(anyData){
+
+export function setCache(anyData) {
     const key = ++id;
-    map.set(key,anyData);
+    map.set(key, anyData);
     return key;
 }
-export function removeCache(key){
+
+export function removeCache(key) {
     map.delete(key);
 }
 
 const SplitPerAngle = 15 / 180 * Math.PI;
 const MinValue = 2 ** -1074;
 const precisionNear1 = 2 ** -53; // double 0.5-1之间的精度
-function tessellateLineRound(geometry) {
+function tessellateFlowLineRound(geometry) {
     if (geometry.type.toLowerCase() !== 'polyline') throw new Error('geometry type is not polyline');
     return geometry.paths.map(_tessellatePath);
 
@@ -243,7 +249,7 @@ function tessellateLineRound(geometry) {
             const p2x = doubleToTwoFloats(path[1][0]);
             const p2y = doubleToTwoFloats(path[1][1]);
             return {
-                vertexCount:4,
+                vertexCount: 4,
                 // hx,hy,lx,ly,offsetx,offsety,distance,delta,side,index
                 vPart1: new Float32Array([
                     p1x[0], p1y[0], p1x[1], p1y[1],
@@ -560,8 +566,15 @@ function tessellateLineRound(geometry) {
         }
 
         function vecInterpolation(n1, n2, range1, range2, cw = true) {
-            const angle = Math.acos(n1.dot(n2) / (n1.length() * n2.length())) || 0;
-            const splitCount = Math.max((angle / SplitPerAngle) >> 0, 1);
+            let dot = n1.dot(n2) / (n1.length() * n2.length());
+            if (Math.abs(dot) > 1) {
+                dot = dot > 0 ? 1 : -1;
+            }
+            const angle = Math.acos(dot) || 0;
+            let count = angle / SplitPerAngle,
+                splitCount = count >> 0;
+            if(count - splitCount >= 0.5) splitCount += 1;
+            splitCount = Math.max(splitCount, 1);
             if (splitCount === 1) {
                 return [
                     {vec: [n1.x, n1.y], value: range1},
@@ -589,6 +602,7 @@ function tessellateLineRound(geometry) {
         }
     }
 }
+
 export function tessellateFlowLine(params) {
     return projection.load().then(() => {
         let {sr, geometry} = JSON.parse(params)
@@ -598,7 +612,7 @@ export function tessellateFlowLine(params) {
             geometry = projection.project(geometry, sr);
         }
         const transferList = [];
-        const meshBuffers = tessellateLineRound(geometry);
+        const meshBuffers = tessellateFlowLineRound(geometry);
         meshBuffers.forEach(({vPart1, vPart2, vPart3, index}) => {
             transferList.push(vPart1.buffer);
             transferList.push(vPart2.buffer);
@@ -617,9 +631,9 @@ export function tessellateFlowLine(params) {
 
 export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedRange}) {
     let cacheId;
-    if(useCache){
+    if (useCache) {
         data.data = map.get(data.data);
-    }else{
+    } else {
         data.data = new Float64Array(data.data);
         cacheId = setCache(data.data);
     }
@@ -632,15 +646,15 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
                 arr[i] === noDataValue ? 0 : arr[i],
                 arr[i + 1] === noDataValue ? 0 : arr[i + 1]
             );
-            min = Math.min(min,l);
-            max = Math.max(max,l);
+            min = Math.min(min, l);
+            max = Math.max(max, l);
         }
-        speedRange = [min,max]
+        speedRange = [min, max]
     }
 
     const sampler = createSampler(data);
     const paths = buildRasterPaths(setting, sampler);
-    const {buffer1, buffer2, buffer3,buffer4} = toBuffer(paths);
+    const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths);
     return {
         result: {
             buffer1: buffer1.buffer,

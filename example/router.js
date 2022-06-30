@@ -47,7 +47,7 @@ const routes = [
     {
         path:'/line-tessellate',
         name:"line-tessellate",
-        component: () => import('./测试/折线剖分')
+        component: () => import('./测试/折线剖分-miter')
     },
     { path: '*', redirect: '/flowing-line' }
 ];
