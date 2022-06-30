@@ -1,3 +1,4 @@
+
 define([
     "esri/geometry/geometryEngine",
     "esri/geometry/projection",
@@ -625,15 +626,14 @@ define([
         map.delete(key);
     }
 
-    function createRasterFlowLineMesh({data, setting, useCache, computeSpeedRange}) {
+    export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedRange}) {
         let cacheId;
         if (useCache) {
             data.data = map.get(data.data);
         } else {
-            data.data = new Float32Array(data.data);
+            data.data = new Float64Array(data.data);
             cacheId = setCache(data.data);
         }
-
         let speedRange
         if (computeSpeedRange) {
             const {data: arr, noDataValue} = data;
@@ -650,8 +650,8 @@ define([
         }
 
         const sampler = createSampler(data);
-        const paths = buildRasterPaths(setting, sampler, data.width, data.height);
-        const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths);
+        const paths = buildRasterPaths(setting, sampler);
+        const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths, setting);
         return {
             result: {
                 buffer1: buffer1.buffer,
@@ -669,7 +669,8 @@ define([
             ]
         }
 
-        function toBuffer(paths) {
+        function toBuffer(paths,{limitRange}) {
+            const [xmin, xmax, ymin, ymax] = limitRange;
             let segmentCount = 0;
             for (let i = 0; i < paths.length; i++) {
                 segmentCount += paths[i].length - 1;
@@ -692,15 +693,16 @@ define([
                     const p1 = path[j];
                     const p2 = path[j + 1];
                     const p3 = j === limit ? path[j + 1] : path[j + 2];
-                    buffer1[c] = p0.x;
-                    buffer1[c1] = p0.y;
-                    buffer1[c2] = p1.x;
-                    buffer1[c3] = p1.y;
+                    //转换为相对于剖分范围左上角的相对坐标,
+                    buffer1[c] = p0.x - xmin;
+                    buffer1[c1] = p0.y - ymax;
+                    buffer1[c2] = p1.x - xmin;
+                    buffer1[c3] = p1.y - ymax;
 
-                    buffer2[c] = p2.x;
-                    buffer2[c1] = p2.y;
-                    buffer2[c2] = p3.x;
-                    buffer2[c3] = p3.y;
+                    buffer2[c] = p2.x - xmin;
+                    buffer2[c1] = p2.y - ymax;
+                    buffer2[c2] = p3.x - xmin;
+                    buffer2[c3] = p3.y - ymax;
 
                     buffer3[c] = p1.t;
                     buffer3[c1] = p2.t;
@@ -720,21 +722,18 @@ define([
             }
         }
 
-        function buildRasterPaths(setting, sampler, width, height) {
+        function buildRasterPaths(setting, sampler) {
             const result = [];
             const [xmin, xmax, ymin, ymax] = setting.limitRange;
             let scaleRatio = 1 / setting.lineCollisionWidth;
-            if (scaleRatio > 1) { // when x < 1, 1 / x increase vary fast
-                scaleRatio = Math.min(scaleRatio ** 0.5, 10)
-            }
+
             const stencilWidth = Math.round((xmax - xmin) * scaleRatio),
                 stencilHeight = Math.round((ymax - ymin) * scaleRatio),
                 collideStencil = new Uint8Array(stencilWidth * stencilHeight);
+
             const f = [];
-            for (let i = 0; i < height; i += setting.lineSpacing) {
-                if (i !== clamp(i, ymin, ymax)) continue;
-                for (let j = 0; j < width; j += setting.lineSpacing) {
-                    if (j !== clamp(j, xmin, xmax)) continue
+            for (let i = ymin; i < ymax; i += setting.lineSpacing) {
+                for (let j = xmin; j < xmax; j += setting.lineSpacing) {
                     f.push({
                         x: j,
                         y: i,
@@ -751,7 +750,7 @@ define([
                         stencilWidth, stencilHeight, scaleRatio,
                         setting.limitRange, rangeChecker
                     );
-                    if (points.length > 2) {
+                    if (points.length > 3) {
                         result.push(points)
                     }
                 }
@@ -776,12 +775,12 @@ define([
                 if (i && !inRange(curPoint.x, curPoint.y)) break;
                 const uv = _vec2.set(...sampler(curPoint.x, curPoint.y));
                 const originSpeed = uv.length();
-                uv.multiplyScalar(setting.velocityScale);
-                const speed = uv.length();
+                const speed = originSpeed * setting.velocityScale; //速度缩放
                 if (speed < setting.minSpeedThreshold) break;
-                curDir.copy(uv).multiplyScalar(1 / speed);
+                uv.normalize();
+                curDir.copy(uv);
                 const nextPoint = _vec2.copy(curPoint).addScaledVector(curDir, setting.segmentLength);
-                time += setting.segmentLength / speed;
+                time += setting.segmentLength / (speed * setting.renderVScale);
                 if (i && Math.acos(curDir.dot(lastDir)) > setting.maxTurnAngle) break;
                 if (setting.mergeLines) {
                     const [xmin, xmax, ymin, ymax] = limitRange;
