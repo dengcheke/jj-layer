@@ -655,6 +655,7 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
     const sampler = createSampler(data);
     const paths = buildRasterPaths(setting, sampler);
     const {buffer1, buffer2, buffer3, buffer4} = toBuffer(paths, setting);
+
     return {
         result: {
             buffer1: buffer1.buffer,
@@ -675,7 +676,7 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
     function toBuffer(paths,{limitRange}) {
         const [xmin, xmax, ymin, ymax] = limitRange;
         let segmentCount = 0;
-        for (let i = 0; i < paths.length; i++) {
+        for (let i = paths.length; i--;) {
             segmentCount += paths[i].length - 1;
         }
         const n = segmentCount * 4;
@@ -683,37 +684,37 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
         const buffer2 = new Float32Array(n);
         const buffer3 = new Float32Array(n);
         const buffer4 = new Float32Array(segmentCount * 2);
-        let cursor = 0;
-        for (let i = 0; i < paths.length; i++) {
+
+        for (let i = 0, cursor = 0; i < paths.length; i++) {
             const path = paths[i];
             const totalTime = path[path.length - 1].t;
             const timeSeed = Math.random();
             const pointCount = path.length;
             for (let j = 0, limit = pointCount - 2; j <= limit; j++) {
-                const c = cursor * 4;
-                const c1 = c + 1, c2 = c + 2, c3 = c + 3;
+                const c4 = cursor * 4, c2 = cursor * 2;
+                const c41 = c4 + 1, c42 = c4 + 2, c43 = c4 + 3;
                 const p0 = j === 0 ? path[0] : path[j - 1];
                 const p1 = path[j];
                 const p2 = path[j + 1];
                 const p3 = j === limit ? path[j + 1] : path[j + 2];
                 //转换为相对于剖分范围左上角的相对坐标,
-                buffer1[c] = p0.x - xmin;
-                buffer1[c1] = p0.y - ymax;
-                buffer1[c2] = p1.x - xmin;
-                buffer1[c3] = p1.y - ymax;
+                buffer1[c4] = p0.x - xmin;
+                buffer1[c41] = p0.y - ymax;
+                buffer1[c42] = p1.x - xmin;
+                buffer1[c43] = p1.y - ymax;
 
-                buffer2[c] = p2.x - xmin;
-                buffer2[c1] = p2.y - ymax;
-                buffer2[c2] = p3.x - xmin;
-                buffer2[c3] = p3.y - ymax;
+                buffer2[c4] = p2.x - xmin;
+                buffer2[c41] = p2.y - ymax;
+                buffer2[c42] = p3.x - xmin;
+                buffer2[c43] = p3.y - ymax;
 
-                buffer3[c] = p1.t;
-                buffer3[c1] = p2.t;
-                buffer3[c2] = totalTime;
-                buffer3[c3] = timeSeed;
+                buffer3[c4] = p1.t;
+                buffer3[c41] = p2.t;
+                buffer3[c42] = totalTime;
+                buffer3[c43] = timeSeed;
 
-                buffer4[cursor * 2] = p1.speed;
-                buffer4[cursor * 2 + 1] = p2.speed;
+                buffer4[c2] = p1.speed;
+                buffer4[c2 + 1] = p2.speed;
                 cursor++;
             }
         }
@@ -726,7 +727,6 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
     }
 
     function buildRasterPaths(setting, sampler) {
-        const result = [];
         const [xmin, xmax, ymin, ymax] = setting.limitRange;
         let scaleRatio = 1 / setting.lineCollisionWidth;
 
@@ -734,19 +734,25 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
             stencilHeight = Math.round((ymax - ymin) * scaleRatio),
             collideStencil = new Uint8Array(stencilWidth * stencilHeight);
 
-        const f = [];
-        for (let i = ymin; i < ymax; i += setting.lineSpacing) {
-            for (let j = xmin; j < xmax; j += setting.lineSpacing) {
-                f.push({
-                    x: j,
-                    y: i,
+        const spacing = setting.lineSpacing;
+        const ys = 1 + (ymax - ymin) / spacing >> 0;
+        const xs = 1 + (xmax - xmin) / spacing >> 0;
+        const f = new Array(xs * ys);
+
+        for (let i = xs; i--;) {
+            for (let j = ys, s = spacing; j--;) {
+                f[j * xs + i] = {
+                    x: xmin + i * s,
+                    y: ymin + j * s,
                     sort: Math.random()
-                });
+                }
             }
         }
         f.sort((a, b) => a.sort - b.sort);
         const rangeChecker = createRangeCheck(setting.limitRange);
-        for (const {x, y} of f) {
+        const result = new Array(f.length);
+        for (let i = f.length; i--;) {
+            const {x, y} = f[i];
             if (Math.random() < setting.density) {
                 const points = buildPath(
                     setting, sampler, x, y, collideStencil,
@@ -754,11 +760,11 @@ export function createRasterFlowLineMesh({data, setting, useCache, computeSpeedR
                     setting.limitRange, rangeChecker
                 );
                 if (points.length > 3) {
-                    result.push(points)
+                    result[i] = points;
                 }
             }
         }
-        return result
+        return result.filter(Boolean)
     }
 
     function buildPath(setting, sampler, startX, startY, stencil, stencilWidth, stencilHeight, scaleRatio, limitRange, inRange) {

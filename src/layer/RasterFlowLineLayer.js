@@ -502,22 +502,26 @@ export async function RasterFlowLineLayerBuilder() {
                 data.speedRange = [min, max];
             }
             const sampler = createSampler(data);
+
             const paths = buildRasterPaths(setting, sampler);
+
             return toBuffer(paths, setting)
 
             function toBuffer(paths, {limitRange}) {
+
                 const [xmin, xmax, ymin, ymax] = limitRange;
                 let segmentCount = 0;
-                for (let i = 0; i < paths.length; i++) {
+                for (let i = paths.length; i--;) {
                     segmentCount += paths[i].length - 1;
                 }
                 const n = segmentCount * 4;
+
                 const buffer1 = new Float32Array(n);
                 const buffer2 = new Float32Array(n);
                 const buffer3 = new Float32Array(n);
                 const buffer4 = new Float32Array(segmentCount * 2);
-                let cursor = 0;
-                for (let i = 0; i < paths.length; i++) {
+
+                for (let i = 0, cursor = 0; i < paths.length; i++) {
                     const path = paths[i];
                     const totalTime = path[path.length - 1].t;
                     const timeSeed = Math.random();
@@ -558,7 +562,6 @@ export async function RasterFlowLineLayerBuilder() {
             }
 
             function buildRasterPaths(setting, sampler) {
-                const result = [];
                 const [xmin, xmax, ymin, ymax] = setting.limitRange;
                 let scaleRatio = 1 / setting.lineCollisionWidth;
 
@@ -567,19 +570,25 @@ export async function RasterFlowLineLayerBuilder() {
                     stencilHeight = Math.round((ymax - ymin) * scaleRatio),
                     collideStencil = new Uint8Array(stencilWidth * stencilHeight);
 
-                const f = [];
-                for (let i = ymin; i <= ymax; i += setting.lineSpacing) {
-                    for (let j = xmin; j <= xmax; j += setting.lineSpacing) {
-                        f.push({
-                            x: j,
-                            y: i,
+                const spacing = setting.lineSpacing;
+                const ys = 1 + (ymax - ymin) / spacing >> 0;
+                const xs = 1 + (xmax - xmin) / spacing >> 0;
+                const f = new Array(xs * ys);
+                for (let i = xs; i--;) {
+                    for (let j = ys, s = spacing; j--;) {
+                        f[j * xs + i] = {
+                            x: xmin + i * s,
+                            y: ymin + j * s,
                             sort: Math.random()
-                        });
+                        }
                     }
                 }
                 f.sort((a, b) => a.sort - b.sort); //shuffle
+
                 const rangeChecker = createRangeCheck(setting.limitRange);
-                for (const {x, y} of f) {
+                const result = new Array(f.length);
+                for (let i = f.length; i--;) {
+                    const {x, y} = f[i];
                     if (Math.random() < setting.density) {
                         const points = buildPath(
                             setting, sampler, x, y, collideStencil,
@@ -587,11 +596,11 @@ export async function RasterFlowLineLayerBuilder() {
                             setting.limitRange, rangeChecker
                         );
                         if (points.length > 3) {
-                            result.push(points)
+                            result[i] = points;
                         }
                     }
                 }
-                return result
+                return result.filter(Boolean)
             }
 
             function buildPath(setting, sampler,
@@ -693,9 +702,6 @@ export async function RasterFlowLineLayerBuilder() {
                 return x + (y - x) * a;
             }
 
-            function clamp(value, min, max) {
-                return Math.max(min, Math.min(max, value));
-            }
         },
 
         async getConnect() {
