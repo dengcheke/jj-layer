@@ -49,6 +49,11 @@ const routes = [
         name:"line-tessellate",
         component: () => import('./测试/折线剖分-miter')
     },
+    {
+        path:'/extent-rotate',
+        name:"extent-rotate",
+        component: () => import('./测试/extent-旋转')
+    },
     { path: '*', redirect: '/flowing-line' }
 ];
 export const router = new VueRouter({

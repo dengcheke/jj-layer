@@ -194,10 +194,42 @@ export async function sleep(t) {
     })
 }
 
-export function isNil(v){
+export function isNil(v) {
     return v === undefined || v === null
 }
 
 export function parseValueNotNil(v, defaultValue) {
     return isNil(v) ? defaultValue : v;
+}
+
+const degToRad = Math.PI / 180;
+
+//一个extent绕其中心旋转deg角度后,最小的新的extent的尺寸, 可以完全覆盖老的extent
+//deg 顺时针为正
+export function rotateExtentCoverOld(extent, deg) {
+    const {width, height, xmin, ymin, xmax, ymax} = extent;
+    const cx = (xmin + xmax) / 2, cy = (ymin + ymax) / 2;
+    deg = (deg % 360 + 360) % 360;
+    deg = deg >= 180 ? 360 - deg : deg;
+    if (deg <= Number.EPSILON) return extent; //deg =0
+
+    let w1, h1;
+    if (deg <= 90) {
+        const cos = Math.cos(deg * degToRad),
+            sin = Math.sin(deg * degToRad);
+        w1 = width * cos + height * sin;
+        h1 = width * sin + height * cos;
+    } else {
+        const cos = Math.cos((deg - 90) * degToRad),
+            sin = Math.sin((deg - 90) * degToRad);
+        w1 = height * cos + width * sin;
+        h1 = height * sin + width * cos;
+    }
+    return {
+        xmin: cx - w1 / 2,
+        xmax: cx + w1 / 2,
+        ymin: cy - h1 / 2,
+        ymax: cy + h1 / 2,
+        spatialReference: extent.spatialReference
+    }
 }

@@ -1,4 +1,11 @@
-import {createVersionChecker, genColorRamp, getRenderTarget, joinChecker, versionErrCatch} from "@src/utils";
+import {
+    createVersionChecker,
+    genColorRamp,
+    getRenderTarget,
+    joinChecker,
+    rotateExtentCoverOld,
+    versionErrCatch
+} from "@src/utils";
 import {debounce} from 'lodash'
 import {
     AdditiveBlending,
@@ -31,14 +38,15 @@ const _mat3 = new Matrix3();
 
 export async function RasterFlowLineLayerBuilder() {
     const [
-        Accessor, Layer,
-        BaseLayerViewGL2D, workers, projection, kernel
+        Accessor, Layer, BaseLayerViewGL2D,
+        workers, projection, Extent, kernel
     ] = await loadModules([
         "esri/core/Accessor",
         "esri/layers/Layer",
         "esri/views/2d/layers/BaseLayerViewGL2D",
         "esri/core/workers",
         "esri/geometry/projection",
+        "esri/geometry/Extent",
         "esri/kernel"
     ]);
 
@@ -241,15 +249,20 @@ export async function RasterFlowLineLayerBuilder() {
                 // cell = 矢量栅格单元(像素)
                 const disPerCell = extent.width / width; //一个栅格像素距离
                 const pixelPerCell = disPerCell / this.view.state.resolution;//一个栅格像素等于多少个屏幕像素
+                const rotate = this.view.state.rotation;
+
 
                 // 动态路径种子放置间距,
                 const spacing = 10 / pixelPerCell;
                 const lineCellWidth = (lineWidth + 2) / pixelPerCell;//线宽对应多少个栅格像素
 
                 //获取view 和 矢量栅格的交集部分, 排除不在视野内的路径种子
-                const limitExtent = this.view.state.extent.clone();
+                let limitExtent = this.view.state.extent.clone();
                 const intersect = limitExtent.intersection(extent);
                 if (!intersect) return false;
+                if (rotate !== 0) {
+                    limitExtent = new Extent(rotateExtentCoverOld(limitExtent, rotate));
+                }
                 limitExtent.expand(1.2);//种子不在视野内不代表路径不会流经视野内, 适当扩大可视范围
                 limitExtent.intersection(extent);
                 const xmin = MathUtils.clamp((limitExtent.xmin - extent.xmin) / disPerCell, 0, width);
